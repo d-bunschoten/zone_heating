@@ -134,6 +134,16 @@ ATTR_TARGET_SETPOINT = "target_setpoint"
 ATTR_PRESENT = "present"
 ATTR_WINDOW_OPEN = "window_open"
 ATTR_TARGET_ENTITIES = "target_entities"
+ATTR_CONTROL_SOURCE = "control_source"
+ATTR_OVERRIDE_ACTIVE = "override_active"
+ATTR_OVERRIDE_REMAINING = "override_remaining_min"
+
+# --- Manual control / Custom detection (F3, spec §5) ------------------------
+# Shadow-state debounce windows (seconds). An underlying-setpoint change within
+# ``OWN_COMMAND_DEBOUNCE`` of HA's own command is HA's echo; a change within
+# ``PRESENCE_DEBOUNCE`` of an HA-initiated presence switch is presence-driven.
+OWN_COMMAND_DEBOUNCE_SECONDS = 10
+PRESENCE_DEBOUNCE_SECONDS = 30
 
 # Truthy raw presence states (entity sources), before debounce (spec §6).
 PRESENCE_TRUTHY_STATES = frozenset({"on", "home", "true", "yes", "1"})

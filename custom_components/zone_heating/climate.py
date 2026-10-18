@@ -1,10 +1,10 @@
 """Climate entity for Zone Heating (one per zone, the device's main entity).
 
-Spec §1.1, §4. The entity wraps a zone's target climate entities. In ``auto``
-(F2) it reflects the coordinator's decision: ``zone_state``, target setpoint and
-``preset_mode`` follow the state machine. Manual ``heat``/``off`` interaction
-(override, boost, Custom) is F3 — those actions still store locally here and the
-coordinator skips non-``auto`` zones.
+Spec §1.1, §4. The entity wraps a zone's target climate entities and is a thin
+view + action forwarder over the coordinator, which owns the authoritative
+per-zone state (auto decision in F2; manual ``hvac_mode``/preset/Custom + timers
+in F3). Display (``hvac_mode``, ``preset_mode``, target setpoint, attributes)
+reads back from the coordinator; the user actions delegate to it.
 """
 
 from __future__ import annotations
@@ -23,6 +23,9 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from . import ZoneHeatingConfigEntry
 from .const import (
+    ATTR_CONTROL_SOURCE,
+    ATTR_OVERRIDE_ACTIVE,
+    ATTR_OVERRIDE_REMAINING,
     ATTR_PRESENT,
     ATTR_TARGET_ENTITIES,
     ATTR_TARGET_SETPOINT,
@@ -70,9 +73,7 @@ class ZoneClimate(ClimateEntity):
         self._attr_unique_id = f"{subentry.subentry_id}_{KEY_CLIMATE}"
         self._attr_device_info = zone_device_info(subentry)
         self._targets: list[str] = list(subentry.data.get(CONF_TARGETS, []))
-        self._attr_hvac_mode = HVACMode.AUTO
-        # Local fallbacks used only outside auto (F3) / before the first eval.
-        self._attr_preset_mode = None
+        # Local fallback shown before the first evaluation only.
         self._attr_target_temperature = DEFAULT_ACTIVE_TEMP
         self._zone_name = zone_name(subentry)
         self._coordinator: ZoneHeatingCoordinator | None = None
@@ -112,6 +113,13 @@ class ZoneClimate(ClimateEntity):
         return self._coordinator.zone_runtime.get(self._subentry_id)
 
     @property
+    def hvac_mode(self) -> HVACMode:
+        """The zone's hvac_mode is owned by the coordinator (spec §3, §4)."""
+        if self._coordinator is None:
+            return HVACMode.AUTO
+        return HVACMode(self._coordinator.zone_hvac_mode(self._subentry_id))
+
+    @property
     def current_temperature(self) -> float | None:
         """Average of the targets' reported current temperatures."""
         temps: list[float] = []
@@ -131,55 +139,71 @@ class ZoneClimate(ClimateEntity):
 
     @property
     def target_temperature(self) -> float | None:
-        """In auto, follow the coordinator's chosen setpoint."""
+        """Follow the coordinator's chosen/forced setpoint (spec §3, §4)."""
         runtime = self._runtime
-        if (
-            self._attr_hvac_mode == HVACMode.AUTO
-            and runtime is not None
-            and runtime.setpoint is not None
-        ):
+        if runtime is not None and runtime.setpoint is not None:
             return runtime.setpoint
         return self._attr_target_temperature
 
     @property
     def preset_mode(self) -> str | None:
-        """In auto, reflect the coordinator's chosen stand (spec §4)."""
+        """Reflect the current stand; Custom shows ``none`` (spec §4).
+
+        In ``auto`` this is the auto-chosen stand; in ``heat`` the forced preset
+        (or ``None`` for Custom); in ``off`` it is ``None``. The coordinator's
+        runtime already encodes all three cases in ``preset_mode``.
+        """
         runtime = self._runtime
-        if self._attr_hvac_mode == HVACMode.AUTO and runtime is not None:
-            return runtime.preset_mode
-        return self._attr_preset_mode
+        return runtime.preset_mode if runtime else None
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        """Expose the zone status (spec §4; control_source/override in F3/F5)."""
+        """Expose the zone status (spec §4; control_source/window_open F5)."""
         runtime = self._runtime
+        coord = self._coordinator
+        sid = self._subentry_id
         return {
             ATTR_ZONE_STATE: runtime.zone_state if runtime else None,
-            ATTR_TARGET_SETPOINT: runtime.setpoint if runtime else None,
+            ATTR_CONTROL_SOURCE: None,  # live mirror is F5
+            ATTR_OVERRIDE_ACTIVE: (
+                coord.zone_override_active(sid) if coord else False
+            ),
+            ATTR_OVERRIDE_REMAINING: (
+                coord.zone_override_remaining_min(sid) if coord else None
+            ),
             ATTR_PRESENT: runtime.present if runtime else False,
             ATTR_WINDOW_OPEN: runtime.window_open if runtime else False,
+            ATTR_TARGET_SETPOINT: runtime.setpoint if runtime else None,
             ATTR_TARGET_ENTITIES: self._targets,
         }
 
-    # --- Interaction --------------------------------------------------------
-    # heat/preset/Custom/boost semantics are F3; F2 stores locally and asks the
-    # coordinator to re-evaluate (so returning to auto takes effect at once).
+    # --- Interaction (spec §4) ----------------------------------------------
     async def async_set_temperature(self, **kwargs: object) -> None:
-        """Store a new target temperature (full Custom handling is F3)."""
-        if (temperature := kwargs.get(ATTR_TEMPERATURE)) is not None:
-            self._attr_target_temperature = float(temperature)  # type: ignore[arg-type]
-            self.async_write_ha_state()
+        """Dial a temperature -> Custom (hvac_mode=heat, preset=none)."""
+        temperature = kwargs.get(ATTR_TEMPERATURE)
+        if temperature is None:
+            return
+        self._attr_target_temperature = float(temperature)  # type: ignore[arg-type]
+        if self._coordinator is not None:
+            await self._coordinator.async_set_zone_custom(
+                self._subentry_id, float(temperature)  # type: ignore[arg-type]
+            )
+        self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Store a new hvac mode and re-evaluate."""
-        self._attr_hvac_mode = hvac_mode
-        self.async_write_ha_state()
+        """Switch hvac_mode (auto/heat/off)."""
         if self._coordinator is not None:
-            self._coordinator.async_request_refresh()
+            await self._coordinator.async_set_zone_hvac_mode(
+                self._subentry_id, hvac_mode.value
+            )
+        self.async_write_ha_state()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Store a new preset mode (manual override wiring is F3)."""
-        self._attr_preset_mode = preset_mode
+        """Force a stand -> hvac_mode=heat with that preset (spec §4)."""
+        if self._coordinator is not None:
+            await self._coordinator.async_set_zone_preset(
+                self._subentry_id, preset_mode
+            )
         self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
