@@ -113,3 +113,27 @@ KEY_ACTIVE_TEMP = "active_temp"
 KEY_CONTROL_SOURCE = "control_source"
 KEY_PRESENT = "present"
 KEY_WINDOW_OPEN = "window_open"
+
+# --- Coordinator (F2) -------------------------------------------------------
+# Periodic re-evaluation so schedule-block boundaries are crossed even without a
+# source state change (spec §3: "triggers + periodieke tick"). Kept well inside
+# any overlay termination (overlay/heartbeat handling itself is F4).
+TICK_INTERVAL_MINUTES = 5
+
+# Custom data field read from a referenced ``schedule`` helper's current on-block
+# (spec §1.1: "De HA schedule-helper draagt per blok een data.temperature").
+SCHEDULE_TEMPERATURE_ATTR = "temperature"
+
+# Dispatcher signal the coordinator sends per zone when its runtime state
+# changes; the climate entity listens on its own zone's signal.
+SIGNAL_ZONE_UPDATE = "zone_heating_zone_update_{subentry_id}"
+
+# --- climate.<zone> extra_state_attributes (spec §4) ------------------------
+ATTR_ZONE_STATE = "zone_state"
+ATTR_TARGET_SETPOINT = "target_setpoint"
+ATTR_PRESENT = "present"
+ATTR_WINDOW_OPEN = "window_open"
+ATTR_TARGET_ENTITIES = "target_entities"
+
+# Truthy raw presence states (entity sources), before debounce (spec §6).
+PRESENCE_TRUTHY_STATES = frozenset({"on", "home", "true", "yes", "1"})

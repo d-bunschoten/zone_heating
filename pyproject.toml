@@ -2,7 +2,7 @@
 name = "zone-heating"
 version = "0.1.0"
 description = "Zone Heating custom integration for Home Assistant"
-requires-python = ">=3.14"
+requires-python = ">=3.14.2"
 # Runtime deps are provided by Home Assistant; none are declared here.
 dependencies = []
 
