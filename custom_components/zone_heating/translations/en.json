@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zone Heating",
+        "description": "Set up the Zone Heating hub. Click Submit to create the integration."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Already configured. Only a single Zone Heating hub is allowed."
+    }
+  }
+}
