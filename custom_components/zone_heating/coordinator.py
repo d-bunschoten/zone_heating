@@ -27,6 +27,7 @@ from functools import partial
 from typing import Callable
 
 from homeassistant.const import (
+    ATTR_ENTITY_ID,
     ATTR_TEMPERATURE,
     STATE_ON,
     STATE_UNAVAILABLE,
@@ -49,14 +50,23 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from .backend import HeatingBackend
+from .backend import HeatingBackend, OverlayTermination
 from .const import (
     CONF_ACTIVE_SCHEDULE,
+    CONF_DEAD_MANS_SWITCH,
+    CONF_OFF_BASELINE_TEMP,
+    CONF_OVERLAY_TERMINATION,
+    CONF_OVERLAY_TIMER_DURATION,
     CONF_STANDBY_SCHEDULE,
     CONF_TARGETS,
     DEFAULT_BOOST_DURATION,
+    DEFAULT_DEAD_MANS_SWITCH,
+    DEFAULT_OFF_BASELINE_TEMP,
+    DEFAULT_OVERLAY_TERMINATION,
+    DEFAULT_OVERLAY_TIMER_DURATION,
     DEFAULT_OVERRIDE_TIMEOUT,
     DOMAIN,
+    HEARTBEAT_INTERVAL_MINUTES,
     KEY_ACTIVE_TEMP,
     KEY_AWAY_TEMP,
     KEY_BOOST_DURATION,
@@ -69,11 +79,19 @@ from .const import (
     KEY_STANDBY_TEMP,
     LOGGER,
     MODE_AUTO,
+    MODE_FALLBACK,
+    MODE_OFF,
+    OVERLAY_TIMER,
     OWN_COMMAND_DEBOUNCE_SECONDS,
     PRESENCE_DEBOUNCE_SECONDS,
     SCHEDULE_TEMPERATURE_ATTR,
     SIGNAL_ZONE_UPDATE,
     TICK_INTERVAL_MINUTES,
+)
+from .engine.baseline import (
+    ScheduleBlock as BaselineBlock,
+    derive_normal_baseline,
+    off_baseline,
 )
 from .engine.override import OverrideInputs, detect_custom_change
 from .engine.state_machine import (
@@ -82,6 +100,7 @@ from .engine.state_machine import (
     HVAC_OFF,
     PRESET_AWAY,
     PRESET_BOOST,
+    STAND_FALLBACK,
     STAND_OFF,
     AutoInputs,
     ScheduleState,
@@ -90,8 +109,53 @@ from .engine.state_machine import (
 )
 from .helpers import iter_zone_subentries, zone_name
 
+# HA core ``schedule`` helper: the full weekly config is only available via the
+# ``get_schedule`` service (the entity state exposes just the current block).
+SCHEDULE_DOMAIN = "schedule"
+SCHEDULE_GET_SERVICE = "get_schedule"
+# HA schedule weekday keys, in order; the first configured day is the one the
+# derived (one_day) baseline uses (spec §8 budget: 1 call/zone -> all_days).
+_WEEKDAYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+
 _UNREADY = (None, STATE_UNKNOWN, STATE_UNAVAILABLE)
 _SETPOINT_TOLERANCE = 0.05
+
+
+def _entries_to_blocks(entries: object) -> list[BaselineBlock]:
+    """Convert ``schedule.get_schedule`` day entries to baseline blocks (spec §8).
+
+    Each entry is ``{"from": <time>, "to": <time>, "data": {"temperature": T}}``;
+    ``from``/``to`` may be ``datetime.time`` objects or strings. Entries without a
+    temperature become ``None`` (treated as a base-filled gap by the engine).
+    """
+    blocks: list[BaselineBlock] = []
+    if not isinstance(entries, list):
+        return blocks
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        start = entry.get("from", entry.get("start"))
+        end = entry.get("to", entry.get("end"))
+        if start is None or end is None:
+            continue
+        data = entry.get("data")
+        temperature = data.get("temperature") if isinstance(data, dict) else None
+        try:
+            temp = float(temperature) if temperature is not None else None
+        except (TypeError, ValueError):
+            temp = None
+        blocks.append(
+            BaselineBlock(start=str(start), end=str(end), temperature=temp)
+        )
+    return blocks
 
 
 @dataclass
@@ -109,6 +173,8 @@ class ZoneContext:
     # Referenced schedule helper entity_ids (``None`` => no schedule, spec §1.1).
     standby_schedule: str | None = None
     active_schedule: str | None = None
+    # Off/frost-protection baseline temperature (spec §8).
+    off_baseline_temp: float = DEFAULT_OFF_BASELINE_TEMP
 
 
 @dataclass
@@ -170,6 +236,11 @@ class ZoneHeatingCoordinator:
         self.manual: dict[str, ZoneManualState] = {}
         self._applied: dict[str, _Applied] = {}
         self._mode_entity: str | None = None
+        # Last applied master mode (spec §2). Set in ``async_setup``; transitions
+        # are driven by ``_async_handle_mode_change``.
+        self._mode: str = MODE_AUTO
+        # Dead-man's-switch heartbeat canceller (spec §7); only armed in auto.
+        self._heartbeat_cancel: Callable[[], None] | None = None
         self._home_present_entity: str | None = None
         self._boost_temp_entity: str | None = None
         self._boost_duration_entity: str | None = None
@@ -231,6 +302,11 @@ class ZoneHeatingCoordinator:
                 ),
                 standby_schedule=subentry.data.get(CONF_STANDBY_SCHEDULE),
                 active_schedule=subentry.data.get(CONF_ACTIVE_SCHEDULE),
+                off_baseline_temp=float(
+                    subentry.data.get(
+                        CONF_OFF_BASELINE_TEMP, DEFAULT_OFF_BASELINE_TEMP
+                    )
+                ),
             )
             self.zones[sid] = ctx
             self.zone_runtime.setdefault(sid, ZoneRuntimeState())
@@ -274,10 +350,15 @@ class ZoneHeatingCoordinator:
                 timedelta(minutes=TICK_INTERVAL_MINUTES),
             )
         )
-        # Cancel any running timer on unload.
+        # Cancel any running timer / heartbeat on unload.
         self.entry.async_on_unload(self._cancel_all_timers)
+        self.entry.async_on_unload(self._cancel_heartbeat)
 
-        await self.async_refresh()
+        # Apply the current master mode: first setup writes the (derived normal or
+        # off) baseline per zone and either starts the state machine (auto),
+        # observes (fallback) or turns the zones off (off). (spec §2, §8).
+        self._mode = self._master_mode() or MODE_AUTO
+        await self._apply_master_mode(previous=None)
 
     @callback
     def _cancel_all_timers(self) -> None:
@@ -289,9 +370,15 @@ class ZoneHeatingCoordinator:
     def _handle_source_change(
         self, event: Event[EventStateChangedData]
     ) -> None:
+        entity_id = event.data["entity_id"]
+        # Master-mode changes drive the orchestration (auto/fallback/off, spec §2).
+        if entity_id == self._mode_entity:
+            self.entry.async_create_task(
+                self.hass, self._async_handle_mode_change(), eager_start=False
+            )
+            return
         # Stamp presence-change timestamps so the shadow-state can ignore
         # presence-driven underlying changes (spec §5 step 2).
-        entity_id = event.data["entity_id"]
         now = dt_util.utcnow()
         if entity_id == self._home_present_entity:
             for ms in self.manual.values():
@@ -473,12 +560,73 @@ class ZoneHeatingCoordinator:
 
     # --- evaluation ---------------------------------------------------------
     async def async_refresh(self) -> None:
-        """Re-evaluate every zone."""
-        if self._master_mode() != MODE_AUTO:
-            # fallback/off master modes are F4; stay hands-off (auto only).
+        """Re-evaluate every zone (only drives devices in master mode auto)."""
+        if self._mode != MODE_AUTO:
+            # In fallback/off the state machine is paused (spec §2): HA observes
+            # (fallback) or holds the zones off (off); no per-zone overlays here.
             return
         for ctx in self.zones.values():
             await self._async_evaluate_zone(ctx)
+
+    # --- master-mode orchestration (spec §2, §8) ----------------------------
+    async def _async_handle_mode_change(self) -> None:
+        """React to a ``select.heating_mode`` change (auto/fallback/off)."""
+        new_mode = self._master_mode() or MODE_AUTO
+        if new_mode == self._mode:
+            return
+        previous = self._mode
+        self._mode = new_mode
+        await self._apply_master_mode(previous=previous)
+
+    async def _apply_master_mode(self, *, previous: str | None) -> None:
+        """Enact the current master mode and do the gated baseline writes (spec §8).
+
+        A Tado schedule is written ONLY at first setup (``previous is None``), when
+        entering Off (off-baseline) and when leaving Off to auto/fallback (derived
+        normal baseline). Auto <-> fallback writes nothing. Config changes re-run
+        setup via an entry reload, which takes the first-setup path again.
+        """
+        mode = self._mode
+        # Leaving Off (or first setup) into auto/fallback restores the derived
+        # normal baseline; first setup into Off / entering Off writes the off one.
+        # (``previous is None`` is first setup; it is never ``MODE_OFF``.)
+        from_off_or_initial = previous is None or previous == MODE_OFF
+        if mode == MODE_OFF:
+            await self._enter_off(write_baseline=previous != MODE_OFF)
+        elif mode == MODE_FALLBACK:
+            await self._enter_fallback(write_baseline=from_off_or_initial)
+        else:
+            await self._enter_auto(write_baseline=from_off_or_initial)
+        self._manage_heartbeat()
+
+    async def _enter_auto(self, *, write_baseline: bool) -> None:
+        """Master mode auto: (re)write the normal baseline, run the machine."""
+        if write_baseline:
+            for ctx in self.zones.values():
+                await self._async_write_normal_baseline(ctx)
+        await self.async_refresh()
+
+    async def _enter_fallback(self, *, write_baseline: bool) -> None:
+        """Master mode fallback: stop asserting overlays, just observe (spec §2)."""
+        if write_baseline:
+            for ctx in self.zones.values():
+                await self._async_write_normal_baseline(ctx)
+        # Drop the applied-command cache so returning to auto re-asserts overlays
+        # (the zone may have drifted onto its Tado schedule while in fallback).
+        for ctx in self.zones.values():
+            self._applied.pop(ctx.subentry_id, None)
+            self._set_runtime_stand(ctx, STAND_FALLBACK)
+
+    async def _enter_off(self, *, write_baseline: bool) -> None:
+        """Master mode off: write the off-baseline, set the zones off (spec §2)."""
+        termination = self._overlay_termination()
+        for ctx in self.zones.values():
+            if write_baseline:
+                await self._async_write_off_baseline(ctx)
+            if ctx.targets:
+                await self.backend.set_off(ctx.targets, termination)
+            self._applied[ctx.subentry_id] = _Applied(off=True, setpoint=None)
+            self._set_runtime_stand(ctx, STAND_OFF)
 
     async def _async_evaluate_zone(self, ctx: ZoneContext) -> None:
         sid = ctx.subentry_id
@@ -528,10 +676,13 @@ class ZoneHeatingCoordinator:
         if self._applied.get(ctx.subentry_id) == want:
             return
         ms = self.manual[ctx.subentry_id]
+        termination = self._overlay_termination()
         if decision.off:
-            await self.backend.set_off(ctx.targets)
+            await self.backend.set_off(ctx.targets, termination)
         else:
-            await self.backend.set_setpoint(ctx.targets, decision.setpoint)
+            await self.backend.set_setpoint(
+                ctx.targets, decision.setpoint, termination
+            )
             ms.last_commanded_setpoint = decision.setpoint
         ms.last_command_at = dt_util.utcnow()
         self._applied[ctx.subentry_id] = want
@@ -560,6 +711,151 @@ class ZoneHeatingCoordinator:
         async_dispatcher_send(
             self.hass, SIGNAL_ZONE_UPDATE.format(subentry_id=sid)
         )
+
+    def _set_runtime_stand(self, ctx: ZoneContext, stand: str) -> None:
+        """Surface a bare stand (Off/Fallback) on the climate entity (spec §4)."""
+        new = ZoneRuntimeState(
+            zone_state=stand,
+            setpoint=None,
+            preset_mode=None,
+            present=self._read_binary(ctx.present_entity),
+            window_open=False,
+        )
+        if self.zone_runtime.get(ctx.subentry_id) != new:
+            self.zone_runtime[ctx.subentry_id] = new
+            self._notify(ctx.subentry_id)
+
+    # --- dead-man's-switch heartbeat (spec §7) ------------------------------
+    def _manage_heartbeat(self) -> None:
+        """Arm/disarm the heartbeat: only in auto with the dead-man's-switch on."""
+        want = self._mode == MODE_AUTO and self._dead_mans_switch()
+        if want and self._heartbeat_cancel is None:
+            self._heartbeat_cancel = async_track_time_interval(
+                self.hass,
+                self._handle_heartbeat,
+                timedelta(minutes=HEARTBEAT_INTERVAL_MINUTES),
+            )
+        elif not want:
+            self._cancel_heartbeat()
+
+    @callback
+    def _cancel_heartbeat(self) -> None:
+        if self._heartbeat_cancel is not None:
+            self._heartbeat_cancel()
+            self._heartbeat_cancel = None
+
+    @callback
+    def _handle_heartbeat(self, _now) -> None:
+        self.entry.async_create_task(
+            self.hass, self._async_heartbeat(), eager_start=False
+        )
+
+    async def _async_heartbeat(self) -> None:
+        """Re-assert each zone's active HA overlay so it stays well inside its
+        termination window (spec §7). Bypasses the redundancy guard on purpose."""
+        if self._mode != MODE_AUTO:
+            return
+        termination = self._overlay_termination()
+        now = dt_util.utcnow()
+        for ctx in self.zones.values():
+            applied = self._applied.get(ctx.subentry_id)
+            if applied is None or applied.off or applied.setpoint is None:
+                continue
+            if ctx.targets:
+                await self.backend.set_setpoint(
+                    ctx.targets, applied.setpoint, termination
+                )
+                # The heartbeat is HA's own command: refresh the own-command
+                # debounce so the device's echo is never read as Custom (spec §5).
+                self.manual[ctx.subentry_id].last_command_at = now
+
+    # --- global config reads (spec §7) --------------------------------------
+    def _dead_mans_switch(self) -> bool:
+        return bool(
+            self.entry.options.get(
+                CONF_DEAD_MANS_SWITCH, DEFAULT_DEAD_MANS_SWITCH
+            )
+        )
+
+    def _overlay_termination(self) -> OverlayTermination:
+        """The configured overlay termination (spec §7)."""
+        mode = self.entry.options.get(
+            CONF_OVERLAY_TERMINATION, DEFAULT_OVERLAY_TERMINATION
+        )
+        if mode == OVERLAY_TIMER:
+            duration = self.entry.options.get(
+                CONF_OVERLAY_TIMER_DURATION, DEFAULT_OVERLAY_TIMER_DURATION
+            )
+            return OverlayTermination(
+                mode=OVERLAY_TIMER, duration_min=int(duration)
+            )
+        return OverlayTermination()
+
+    # --- baseline writes (spec §8) ------------------------------------------
+    async def _async_write_normal_baseline(self, ctx: ZoneContext) -> None:
+        """Write the derived normal baseline for one zone (spec §8)."""
+        base = self._read_number(ctx.standby_number)
+        if base is None:
+            LOGGER.debug(
+                "Zone %s: standby_temp unavailable, skipping normal baseline",
+                ctx.name,
+            )
+            return
+        day_blocks = await self._async_read_standby_day_blocks(ctx)
+        baseline = derive_normal_baseline(day_blocks, base)
+        if ctx.targets:
+            await self.backend.set_schedule(
+                ctx.targets, baseline.timetable, list(baseline.blocks)
+            )
+
+    async def _async_write_off_baseline(self, ctx: ZoneContext) -> None:
+        """Write the flat off/frost-protection baseline for one zone (spec §8)."""
+        baseline = off_baseline(ctx.off_baseline_temp)
+        if ctx.targets:
+            await self.backend.set_schedule(
+                ctx.targets, baseline.timetable, list(baseline.blocks)
+            )
+
+    async def _async_read_standby_day_blocks(
+        self, ctx: ZoneContext
+    ) -> list[BaselineBlock]:
+        """Read the standby schedule's representative day as baseline blocks.
+
+        The full weekly schedule is read via the ``schedule.get_schedule`` service;
+        the first configured weekday is used as the single daily curve (the
+        one_day/all_days baseline honours the "1 call/zone" budget, spec §8). No
+        schedule configured, or the helper unavailable -> an empty list (the pure
+        derivation then yields a flat base-temp curve).
+        """
+        if not ctx.standby_schedule:
+            return []
+        try:
+            response = await self.hass.services.async_call(
+                SCHEDULE_DOMAIN,
+                SCHEDULE_GET_SERVICE,
+                {ATTR_ENTITY_ID: ctx.standby_schedule},
+                blocking=True,
+                return_response=True,
+            )
+        except Exception as err:  # noqa: BLE001 - defensive: never block the write
+            LOGGER.warning(
+                "Zone %s: could not read standby schedule %s (%s); "
+                "using a flat base baseline",
+                ctx.name,
+                ctx.standby_schedule,
+                err,
+            )
+            return []
+        if not isinstance(response, dict):
+            return []
+        week = response.get(ctx.standby_schedule, response)
+        if not isinstance(week, dict):
+            return []
+        for day in _WEEKDAYS:
+            entries = week.get(day)
+            if entries:
+                return _entries_to_blocks(entries)
+        return []
 
     # --- Custom detection (spec §5) -----------------------------------------
     async def _async_maybe_custom(self, sid: str, reported: float) -> None:

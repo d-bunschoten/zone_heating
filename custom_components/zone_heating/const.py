@@ -35,6 +35,10 @@ CONF_OFF_DELAY = "off_delay"
 CONF_WINDOW_SENSOR = "window_sensor"
 CONF_STANDBY_SCHEDULE = "standby_schedule"
 CONF_ACTIVE_SCHEDULE = "active_schedule"
+# Off/frost-protection baseline temperature written to Tado in master mode Off
+# (spec §8: the off-baseline is configured per zone; the normal baseline is
+# derived). A single flat temperature is the simplest fit for "vorstbeveiliging".
+CONF_OFF_BASELINE_TEMP = "off_baseline_temp"
 
 # --- Global (hub / options-flow) config keys (spec §1.2, §1.3) --------------
 CONF_HOME_PRESENCE_ENTITY = "home_presence_entity"
@@ -66,6 +70,8 @@ DEFAULT_OVERLAY_TIMER_DURATION = 60
 DEFAULT_AWAY_TEMP = 16.0
 DEFAULT_STANDBY_TEMP = 18.0
 DEFAULT_ACTIVE_TEMP = 20.0
+# Conventional frost-protection setpoint for the off-baseline (spec §8).
+DEFAULT_OFF_BASELINE_TEMP = 7.0
 
 # Temperature number bounds (shared by zone setpoints, boost temp, climate).
 MIN_TEMP = 5.0
@@ -119,6 +125,14 @@ KEY_WINDOW_OPEN = "window_open"
 # source state change (spec §3: "triggers + periodieke tick"). Kept well inside
 # any overlay termination (overlay/heartbeat handling itself is F4).
 TICK_INTERVAL_MINUTES = 5
+
+# --- Dead-man's-switch heartbeat (F4, spec §7) ------------------------------
+# When the dead-man's-switch is on, the coordinator re-asserts the current
+# overlays on this interval so a live HA keeps control well inside the overlay
+# termination window (``next_block`` is >= one schedule block away). If HA dies
+# the overlay lapses and Tado falls back to the baseline. Chosen comfortably
+# below any realistic ``next_block`` gap; re-asserting an overlay is local/free.
+HEARTBEAT_INTERVAL_MINUTES = 10
 
 # Custom data field read from a referenced ``schedule`` helper's current on-block
 # (spec §1.1: "De HA schedule-helper draagt per blok een data.temperature").

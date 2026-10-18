@@ -27,6 +27,7 @@ from custom_components.zone_heating.backend_tado import (
     ATTR_HVAC_MODE,
     TADO_DOMAIN,
     TADO_SERVICE_SET_MODE,
+    TADO_SERVICE_SET_SCHEDULE,
 )
 from custom_components.zone_heating.const import (
     CONF_HOME_OFF_DELAY,
@@ -79,6 +80,7 @@ async def _setup(
     hass.states.async_set(HOME_SOURCE, home)
     hass.states.async_set(ZONE_SOURCE, zone)
     calls = async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_MODE)
+    async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_SCHEDULE)
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={},

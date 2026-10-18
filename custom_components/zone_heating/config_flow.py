@@ -32,6 +32,7 @@ from .const import (
     CONF_HOME_PRESENCE_ENTITY,
     CONF_HOME_PRESENCE_TEMPLATE,
     CONF_NAME,
+    CONF_OFF_BASELINE_TEMP,
     CONF_OFF_DELAY,
     CONF_ON_DELAY,
     CONF_OVERLAY_TERMINATION,
@@ -44,13 +45,17 @@ from .const import (
     DEFAULT_DEAD_MANS_SWITCH,
     DEFAULT_HOME_OFF_DELAY,
     DEFAULT_HOME_ON_DELAY,
+    DEFAULT_OFF_BASELINE_TEMP,
     DEFAULT_OFF_DELAY,
     DEFAULT_ON_DELAY,
     DEFAULT_OVERLAY_TERMINATION,
     DEFAULT_OVERLAY_TIMER_DURATION,
     DOMAIN,
+    MAX_TEMP,
+    MIN_TEMP,
     OVERLAY_TERMINATION_OPTIONS,
     SUBENTRY_TYPE_ZONE,
+    TEMP_STEP,
 )
 
 # A single, unique id so only one hub entry can ever be created.
@@ -102,6 +107,20 @@ def _zone_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Optional(CONF_ACTIVE_SCHEDULE): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="schedule")
+            ),
+            vol.Optional(
+                CONF_OFF_BASELINE_TEMP,
+                default=defaults.get(
+                    CONF_OFF_BASELINE_TEMP, DEFAULT_OFF_BASELINE_TEMP
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MIN_TEMP,
+                    max=MAX_TEMP,
+                    step=TEMP_STEP,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="°C",
+                )
             ),
         }
     )

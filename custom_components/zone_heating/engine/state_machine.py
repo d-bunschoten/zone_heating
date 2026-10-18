@@ -31,6 +31,8 @@ STAND_BOOST = "Boost"
 STAND_CUSTOM = "Custom"
 STAND_WINDOW_OPEN = "Window-open"
 STAND_OFF = "Off"
+# Master-mode Fallback: HA observes, the zone runs the Tado baseline (spec §2, §4).
+STAND_FALLBACK = "Fallback"
 
 # --- preset_mode values (spec §1.1, §4) -------------------------------------
 # Lowercase; identical to the climate entity's preset strings (``const.py``

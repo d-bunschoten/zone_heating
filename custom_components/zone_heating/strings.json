@@ -48,7 +48,8 @@
             "off_delay": "Presence off-delay (minutes)",
             "window_sensor": "Window sensor",
             "standby_schedule": "Standby schedule helper",
-            "active_schedule": "Active schedule helper"
+            "active_schedule": "Active schedule helper",
+            "off_baseline_temp": "Off / frost-protection temperature (°C)"
           }
         },
         "reconfigure": {
@@ -63,7 +64,8 @@
             "off_delay": "Presence off-delay (minutes)",
             "window_sensor": "Window sensor",
             "standby_schedule": "Standby schedule helper",
-            "active_schedule": "Active schedule helper"
+            "active_schedule": "Active schedule helper",
+            "off_baseline_temp": "Off / frost-protection temperature (°C)"
           }
         }
       }

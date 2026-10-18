@@ -15,6 +15,7 @@ from custom_components.zone_heating.backend_tado import (
     ATTR_HVAC_MODE,
     TADO_DOMAIN,
     TADO_SERVICE_SET_MODE,
+    TADO_SERVICE_SET_SCHEDULE,
 )
 from custom_components.zone_heating.const import (
     CONF_ACTIVE_SCHEDULE,
@@ -67,6 +68,7 @@ async def _setup(
     hass.states.async_set(ZONE_SOURCE, zone)
 
     calls = async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_MODE)
+    async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_SCHEDULE)
 
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -202,6 +204,7 @@ async def _setup_with_active_schedule(
     hass.states.async_set(ACTIVE_SCHEDULE, schedule_state, attrs)
 
     calls = async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_MODE)
+    async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_SCHEDULE)
 
     subentry = ConfigSubentryData(
         data={
