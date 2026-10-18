@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, LOGGER
-
-# No platforms are forwarded yet (scaffold phase F0).
-PLATFORMS: list[Platform] = []
+from .const import DOMAIN, LOGGER, PLATFORMS
 
 
 class ZoneHeatingRuntimeData:
     """Container for runtime data kept on the config entry.
 
-    Intentionally empty in F0; business logic (engine, coordinators) will be
-    attached here in later phases.
+    Intentionally minimal in F1 (config surface + entities only). The engine,
+    coordinator and backends are attached here in later phases (F2+).
     """
 
 
@@ -30,10 +26,13 @@ async def async_setup_entry(
     """Set up Zone Heating from a config entry."""
     LOGGER.debug("Setting up %s entry %s", DOMAIN, entry.entry_id)
 
-    # Store runtime data on the entry (no platforms forwarded yet).
     entry.runtime_data = ZoneHeatingRuntimeData()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Reload when the hub options or the set of zone subentries change, so newly
+    # added zones get their device and entities created.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
 
@@ -45,3 +44,10 @@ async def async_unload_entry(
     LOGGER.debug("Unloading %s entry %s", DOMAIN, entry.entry_id)
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def _async_update_listener(
+    hass: HomeAssistant, entry: ZoneHeatingConfigEntry
+) -> None:
+    """Reload the entry when its options or subentries change."""
+    await hass.config_entries.async_reload(entry.entry_id)

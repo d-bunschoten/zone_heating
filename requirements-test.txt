@@ -1,0 +1,5 @@
+# Test dependencies for Zone Heating.
+#
+# pytest-homeassistant-custom-component 0.13.372 pins homeassistant==2026.10.1
+# (matching the production/test instance) and requires Python >=3.14.
+pytest-homeassistant-custom-component==0.13.372

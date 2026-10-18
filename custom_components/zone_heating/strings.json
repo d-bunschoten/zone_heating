@@ -3,11 +3,97 @@
     "step": {
       "user": {
         "title": "Zone Heating",
-        "description": "Set up the Zone Heating hub. Click Submit to create the integration."
+        "description": "Set up the Zone Heating hub. Click Submit to create the integration. Add heating zones afterwards from the hub's configuration."
       }
     },
     "abort": {
-      "single_instance_allowed": "Already configured. Only a single Zone Heating hub is allowed."
+      "already_configured": "Already configured. Only a single Zone Heating hub is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Global heating settings",
+        "description": "Home presence, debounce delays, dead-man's-switch and overlay termination.",
+        "data": {
+          "home_presence_entity": "Home presence entity",
+          "home_presence_template": "Home presence template",
+          "home_on_delay": "Home presence on-delay (minutes)",
+          "home_off_delay": "Home presence off-delay (minutes)",
+          "dead_mans_switch": "Dead-man's-switch",
+          "overlay_termination": "Overlay termination",
+          "overlay_timer_duration": "Overlay timer duration (minutes)"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "zone": {
+      "title": "Heating zone",
+      "entry_type": "Heating zone",
+      "initiate_flow": {
+        "user": "Add heating zone",
+        "reconfigure": "Reconfigure heating zone"
+      },
+      "step": {
+        "user": {
+          "title": "Add heating zone",
+          "description": "A zone groups one or more target climate entities and drives them together.",
+          "data": {
+            "name": "Name",
+            "targets": "Target climate entities",
+            "presence_entity": "Presence entity",
+            "presence_template": "Presence template",
+            "on_delay": "Presence on-delay (minutes)",
+            "off_delay": "Presence off-delay (minutes)",
+            "window_sensor": "Window sensor",
+            "standby_schedule": "Standby schedule helper",
+            "active_schedule": "Active schedule helper"
+          }
+        },
+        "reconfigure": {
+          "title": "Reconfigure heating zone",
+          "description": "Change the zone's targets and settings.",
+          "data": {
+            "name": "Name",
+            "targets": "Target climate entities",
+            "presence_entity": "Presence entity",
+            "presence_template": "Presence template",
+            "on_delay": "Presence on-delay (minutes)",
+            "off_delay": "Presence off-delay (minutes)",
+            "window_sensor": "Window sensor",
+            "standby_schedule": "Standby schedule helper",
+            "active_schedule": "Active schedule helper"
+          }
+        }
+      }
+    }
+  },
+  "selector": {
+    "overlay_termination": {
+      "options": {
+        "next_block": "Next schedule block",
+        "timer": "Fixed timer"
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "heating_mode": {
+        "state": {
+          "auto": "Auto",
+          "fallback": "Fallback",
+          "off": "Off"
+        }
+      }
+    },
+    "sensor": {
+      "control_source": {
+        "state": {
+          "ha_overlay": "HA overlay",
+          "tado_schedule": "Tado schedule"
+        }
+      }
     }
   }
 }

@@ -1,0 +1,17 @@
+[project]
+name = "zone-heating"
+version = "0.1.0"
+description = "Zone Heating custom integration for Home Assistant"
+requires-python = ">=3.14"
+# Runtime deps are provided by Home Assistant; none are declared here.
+dependencies = []
+
+[dependency-groups]
+# Installed by `uv run` for the test command below.
+test = [
+    "pytest-homeassistant-custom-component==0.13.372",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
