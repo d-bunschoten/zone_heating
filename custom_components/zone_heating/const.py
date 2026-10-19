@@ -84,8 +84,9 @@ DEFAULT_OVERLAY_TIMER_DURATION = 60
 DEFAULT_AWAY_TEMP = 16.0
 DEFAULT_STANDBY_TEMP = 18.0
 DEFAULT_ACTIVE_TEMP = 20.0
-# Conventional frost-protection setpoint for the off-baseline (spec §8).
-DEFAULT_OFF_BASELINE_TEMP = 7.0
+# Frost-protection setpoint for the off-baseline (spec §8); matches Tado's own
+# frost protection (5 °C) and the integration's MIN_TEMP.
+DEFAULT_OFF_BASELINE_TEMP = 5.0
 
 # Temperature number bounds (shared by zone setpoints, boost temp, climate).
 MIN_TEMP = 5.0

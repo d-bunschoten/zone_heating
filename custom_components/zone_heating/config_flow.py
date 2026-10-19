@@ -93,10 +93,16 @@ def _zone_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="climate", multiple=True)
             ),
-            vol.Optional(CONF_PRESENCE_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig()
-            ),
-            vol.Optional(CONF_PRESENCE_TEMPLATE): selector.TemplateSelector(),
+            vol.Optional(
+                CONF_PRESENCE_ENTITY,
+                description={"suggested_value": defaults.get(CONF_PRESENCE_ENTITY)},
+            ): selector.EntitySelector(selector.EntitySelectorConfig()),
+            vol.Optional(
+                CONF_PRESENCE_TEMPLATE,
+                description={
+                    "suggested_value": defaults.get(CONF_PRESENCE_TEMPLATE)
+                },
+            ): selector.TemplateSelector(),
             vol.Optional(
                 CONF_ON_DELAY, default=defaults.get(CONF_ON_DELAY, DEFAULT_ON_DELAY)
             ): _minutes_selector(),
@@ -104,7 +110,10 @@ def _zone_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_OFF_DELAY,
                 default=defaults.get(CONF_OFF_DELAY, DEFAULT_OFF_DELAY),
             ): _minutes_selector(),
-            vol.Optional(CONF_WINDOW_SENSOR): selector.EntitySelector(
+            vol.Optional(
+                CONF_WINDOW_SENSOR,
+                description={"suggested_value": defaults.get(CONF_WINDOW_SENSOR)},
+            ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="binary_sensor")
             ),
             vol.Optional(
@@ -119,13 +128,24 @@ def _zone_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                     CONF_WINDOW_CLOSE_DELAY, DEFAULT_WINDOW_CLOSE_DELAY
                 ),
             ): _minutes_selector(),
-            vol.Optional(CONF_SCHEDULE_SWITCH): selector.EntitySelector(
+            vol.Optional(
+                CONF_SCHEDULE_SWITCH,
+                description={"suggested_value": defaults.get(CONF_SCHEDULE_SWITCH)},
+            ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="switch")
             ),
-            vol.Optional(CONF_STANDBY_SCHEDULE): selector.EntitySelector(
+            vol.Optional(
+                CONF_STANDBY_SCHEDULE,
+                description={
+                    "suggested_value": defaults.get(CONF_STANDBY_SCHEDULE)
+                },
+            ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="schedule")
             ),
-            vol.Optional(CONF_ACTIVE_SCHEDULE): selector.EntitySelector(
+            vol.Optional(
+                CONF_ACTIVE_SCHEDULE,
+                description={"suggested_value": defaults.get(CONF_ACTIVE_SCHEDULE)},
+            ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="schedule")
             ),
             vol.Optional(
