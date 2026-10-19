@@ -39,8 +39,11 @@ from .const import (
     CONF_OVERLAY_TIMER_DURATION,
     CONF_PRESENCE_ENTITY,
     CONF_PRESENCE_TEMPLATE,
+    CONF_SCHEDULE_SWITCH,
     CONF_STANDBY_SCHEDULE,
     CONF_TARGETS,
+    CONF_WINDOW_CLOSE_DELAY,
+    CONF_WINDOW_OPEN_DELAY,
     CONF_WINDOW_SENSOR,
     DEFAULT_DEAD_MANS_SWITCH,
     DEFAULT_HOME_OFF_DELAY,
@@ -50,6 +53,8 @@ from .const import (
     DEFAULT_ON_DELAY,
     DEFAULT_OVERLAY_TERMINATION,
     DEFAULT_OVERLAY_TIMER_DURATION,
+    DEFAULT_WINDOW_CLOSE_DELAY,
+    DEFAULT_WINDOW_OPEN_DELAY,
     DOMAIN,
     MAX_TEMP,
     MIN_TEMP,
@@ -101,6 +106,21 @@ def _zone_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ): _minutes_selector(),
             vol.Optional(CONF_WINDOW_SENSOR): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="binary_sensor")
+            ),
+            vol.Optional(
+                CONF_WINDOW_OPEN_DELAY,
+                default=defaults.get(
+                    CONF_WINDOW_OPEN_DELAY, DEFAULT_WINDOW_OPEN_DELAY
+                ),
+            ): _minutes_selector(),
+            vol.Optional(
+                CONF_WINDOW_CLOSE_DELAY,
+                default=defaults.get(
+                    CONF_WINDOW_CLOSE_DELAY, DEFAULT_WINDOW_CLOSE_DELAY
+                ),
+            ): _minutes_selector(),
+            vol.Optional(CONF_SCHEDULE_SWITCH): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch")
             ),
             vol.Optional(CONF_STANDBY_SCHEDULE): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="schedule")

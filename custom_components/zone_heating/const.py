@@ -33,6 +33,14 @@ CONF_PRESENCE_TEMPLATE = "presence_template"
 CONF_ON_DELAY = "on_delay"
 CONF_OFF_DELAY = "off_delay"
 CONF_WINDOW_SENSOR = "window_sensor"
+# Window-open debounce (minutes, spec §3). Open is reacted to immediately (safety);
+# closing waits out the close-delay before the zone returns to its chosen mode, so
+# a briefly cracked window does not whipsaw the setpoint.
+CONF_WINDOW_OPEN_DELAY = "window_open_delay"
+CONF_WINDOW_CLOSE_DELAY = "window_close_delay"
+# Optional explicit ``switch.<zone>_schedule`` override (spec §5). When unset the
+# coordinator derives it from the zone's first target (``switch.<object_id>_schedule``).
+CONF_SCHEDULE_SWITCH = "schedule_switch"
 CONF_STANDBY_SCHEDULE = "standby_schedule"
 CONF_ACTIVE_SCHEDULE = "active_schedule"
 # Off/frost-protection baseline temperature written to Tado in master mode Off
@@ -60,6 +68,12 @@ DEFAULT_ON_DELAY = 0
 DEFAULT_OFF_DELAY = 10
 DEFAULT_HOME_ON_DELAY = 0
 DEFAULT_HOME_OFF_DELAY = 10
+# Window-open debounce (minutes, spec §3). Open 0 = react at once (safety: a cold
+# draught must cut heating immediately). Close 5 = a short close-delay so a window
+# opened briefly for airing, or a flapping reed sensor, does not bounce the zone
+# back on only to shut it off again seconds later.
+DEFAULT_WINDOW_OPEN_DELAY = 0
+DEFAULT_WINDOW_CLOSE_DELAY = 5
 DEFAULT_DEAD_MANS_SWITCH = True
 DEFAULT_OVERLAY_TERMINATION = OVERLAY_NEXT_BLOCK
 DEFAULT_OVERLAY_TIMER_DURATION = 60
@@ -139,8 +153,22 @@ HEARTBEAT_INTERVAL_MINUTES = 10
 SCHEDULE_TEMPERATURE_ATTR = "temperature"
 
 # Dispatcher signal the coordinator sends per zone when its runtime state
-# changes; the climate entity listens on its own zone's signal.
+# changes; the climate entity and control_source sensor listen on the zone's signal.
 SIGNAL_ZONE_UPDATE = "zone_heating_zone_update_{subentry_id}"
+# Dispatcher signal for global-state changes (``binary_sensor.heating_in_fallback``).
+SIGNAL_GLOBAL_UPDATE = "zone_heating_global_update"
+
+# tado_hijack exposes a per-zone schedule switch; ``on`` = the zone follows its
+# Tado schedule, ``off`` = HA holds an overlay (spec §5). Derived from the zone's
+# first target climate (``switch.<object_id>_schedule``) unless configured.
+SWITCH_DOMAIN = "switch"
+SCHEDULE_SWITCH_SUFFIX = "_schedule"
+
+# Store (``.storage``) holding the per-zone signature of the last-written Tado
+# baseline, so a reload/restart only rewrites a baseline that actually changed
+# (spec §8 dedupe; avoids needless Tado-cloud calls on every reload).
+STORAGE_VERSION = 1
+STORAGE_KEY_BASELINES = "zone_heating_baselines"
 
 # --- climate.<zone> extra_state_attributes (spec §4) ------------------------
 ATTR_ZONE_STATE = "zone_state"

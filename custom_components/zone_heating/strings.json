@@ -47,6 +47,9 @@
             "on_delay": "Presence on-delay (minutes)",
             "off_delay": "Presence off-delay (minutes)",
             "window_sensor": "Window sensor",
+            "window_open_delay": "Window open-delay (minutes)",
+            "window_close_delay": "Window close-delay (minutes)",
+            "schedule_switch": "Tado schedule switch (optional)",
             "standby_schedule": "Standby schedule helper",
             "active_schedule": "Active schedule helper",
             "off_baseline_temp": "Off / frost-protection temperature (°C)"
@@ -63,6 +66,9 @@
             "on_delay": "Presence on-delay (minutes)",
             "off_delay": "Presence off-delay (minutes)",
             "window_sensor": "Window sensor",
+            "window_open_delay": "Window open-delay (minutes)",
+            "window_close_delay": "Window close-delay (minutes)",
+            "schedule_switch": "Tado schedule switch (optional)",
             "standby_schedule": "Standby schedule helper",
             "active_schedule": "Active schedule helper",
             "off_baseline_temp": "Off / frost-protection temperature (°C)"

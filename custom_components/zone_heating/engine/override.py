@@ -35,8 +35,9 @@ class OverrideInputs:
     - ``presence_change_recent``: an HA-initiated presence switch happened within
       the presence debounce (~30 s, spec §5 step 2).
     - ``is_expected_schedule_fallback``: an overlay expired and the zone fell back
-      to the Tado schedule (spec §5 step 3). **F3 always passes ``False``**; the
-      ``switch.<zone>_schedule`` wiring that computes it is F4/F5.
+      to the Tado schedule (spec §5 step 3). The coordinator computes it from
+      ``switch.<zone>_schedule`` being ``on`` (F5); when so, the underlying change is
+      the schedule, never a manual Custom.
     """
 
     reported_setpoint: float | None

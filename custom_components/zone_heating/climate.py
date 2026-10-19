@@ -9,6 +9,9 @@ reads back from the coordinator; the user actions delegate to it.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 from homeassistant.components.climate import (
     ClimateEntity,
     ClimateEntityFeature,
@@ -20,6 +23,7 @@ from homeassistant.core import Event, EventStateChangedData, HomeAssistant, call
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 
 from . import ZoneHeatingConfigEntry
 from .const import (
@@ -44,7 +48,31 @@ from .coordinator import ZoneHeatingCoordinator, ZoneRuntimeState
 from .helpers import iter_zone_subentries, zone_device_info, zone_name
 
 
-class ZoneClimate(ClimateEntity):
+@dataclass
+class _ZoneClimateRestoreData(ExtraStoredData):
+    """Persisted manual state so a zone survives an HA restart (spec §9).
+
+    The authoritative manual state (hvac_mode/preset/Custom + respect-window) lives
+    in the coordinator, which is recreated cold on restart; the climate entity is
+    the RestoreEntity that carries it across so the coordinator's first evaluation
+    resumes the user's stand instead of defaulting to ``auto``.
+    """
+
+    hvac_mode: str
+    preset: str | None
+    custom_setpoint: float | None
+    override_remaining_min: int | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "hvac_mode": self.hvac_mode,
+            "preset": self.preset,
+            "custom_setpoint": self.custom_setpoint,
+            "override_remaining_min": self.override_remaining_min,
+        }
+
+
+class ZoneClimate(ClimateEntity, RestoreEntity):
     """The user-facing thermostat for a heating zone."""
 
     _attr_has_entity_name = True
@@ -79,9 +107,21 @@ class ZoneClimate(ClimateEntity):
         self._coordinator: ZoneHeatingCoordinator | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator updates and track the target entities."""
+        """Restore manual state, subscribe to updates, track the targets (spec §9)."""
         await super().async_added_to_hass()
         self._coordinator = self._entry.runtime_data.coordinator
+        # Runs before the coordinator's ``async_setup``: hand the restored manual
+        # state to it so the first evaluation resumes the user's stand (spec §9).
+        restored = await self.async_get_last_extra_data()
+        if restored is not None:
+            data = restored.as_dict()
+            self._coordinator.restore_zone_manual(
+                self._subentry_id,
+                hvac_mode=data.get("hvac_mode", HVACMode.AUTO.value),
+                preset=data.get("preset"),
+                custom_setpoint=data.get("custom_setpoint"),
+                remaining_min=data.get("override_remaining_min"),
+            )
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
@@ -157,14 +197,30 @@ class ZoneClimate(ClimateEntity):
         return runtime.preset_mode if runtime else None
 
     @property
+    def extra_restore_state_data(self) -> _ZoneClimateRestoreData | None:
+        """Persist the manual state so it survives a restart (spec §9)."""
+        coord = self._coordinator
+        if coord is None:
+            return None
+        sid = self._subentry_id
+        return _ZoneClimateRestoreData(
+            hvac_mode=coord.zone_stored_hvac_mode(sid),
+            preset=coord.zone_manual_preset(sid),
+            custom_setpoint=coord.zone_custom_setpoint(sid),
+            override_remaining_min=coord.zone_override_remaining_min(sid),
+        )
+
+    @property
     def extra_state_attributes(self) -> dict[str, object]:
-        """Expose the zone status (spec §4; control_source/window_open F5)."""
+        """Expose the zone status (spec §4; control_source live mirror, spec §5)."""
         runtime = self._runtime
         coord = self._coordinator
         sid = self._subentry_id
         return {
             ATTR_ZONE_STATE: runtime.zone_state if runtime else None,
-            ATTR_CONTROL_SOURCE: None,  # live mirror is F5
+            ATTR_CONTROL_SOURCE: (
+                coord.zone_control_source(sid) if coord else None
+            ),
             ATTR_OVERRIDE_ACTIVE: (
                 coord.zone_override_active(sid) if coord else False
             ),

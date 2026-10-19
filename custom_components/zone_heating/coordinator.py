@@ -21,6 +21,7 @@ Restart-persistence of a running timer / the manual state is F5.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -40,6 +41,7 @@ from homeassistant.core import (
     HomeAssistant,
     State,
     callback,
+    split_entity_id,
 )
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -48,6 +50,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .backend import HeatingBackend, OverlayTermination
@@ -57,8 +60,11 @@ from .const import (
     CONF_OFF_BASELINE_TEMP,
     CONF_OVERLAY_TERMINATION,
     CONF_OVERLAY_TIMER_DURATION,
+    CONF_SCHEDULE_SWITCH,
     CONF_STANDBY_SCHEDULE,
     CONF_TARGETS,
+    CONTROL_SOURCE_HA_OVERLAY,
+    CONTROL_SOURCE_TADO_SCHEDULE,
     DEFAULT_BOOST_DURATION,
     DEFAULT_DEAD_MANS_SWITCH,
     DEFAULT_OFF_BASELINE_TEMP,
@@ -77,6 +83,7 @@ from .const import (
     KEY_OVERRIDE_TIMEOUT,
     KEY_PRESENT,
     KEY_STANDBY_TEMP,
+    KEY_WINDOW_OPEN,
     LOGGER,
     MODE_AUTO,
     MODE_FALLBACK,
@@ -84,11 +91,17 @@ from .const import (
     OVERLAY_TIMER,
     OWN_COMMAND_DEBOUNCE_SECONDS,
     PRESENCE_DEBOUNCE_SECONDS,
+    SCHEDULE_SWITCH_SUFFIX,
     SCHEDULE_TEMPERATURE_ATTR,
+    SIGNAL_GLOBAL_UPDATE,
     SIGNAL_ZONE_UPDATE,
+    STORAGE_KEY_BASELINES,
+    STORAGE_VERSION,
+    SWITCH_DOMAIN,
     TICK_INTERVAL_MINUTES,
 )
 from .engine.baseline import (
+    BaselineTimetable,
     ScheduleBlock as BaselineBlock,
     derive_normal_baseline,
     off_baseline,
@@ -102,6 +115,7 @@ from .engine.state_machine import (
     PRESET_BOOST,
     STAND_FALLBACK,
     STAND_OFF,
+    STAND_WINDOW_OPEN,
     AutoInputs,
     ScheduleState,
     ZoneDecision,
@@ -175,6 +189,11 @@ class ZoneContext:
     active_schedule: str | None = None
     # Off/frost-protection baseline temperature (spec §8).
     off_baseline_temp: float = DEFAULT_OFF_BASELINE_TEMP
+    # ``switch.<zone>_schedule`` (spec §5): ``on`` = zone follows Tado schedule,
+    # ``off`` = HA holds an overlay. Drives ``control_source`` / ``in_fallback``.
+    schedule_switch: str | None = None
+    # ``binary_sensor.<zone>_window_open`` (debounced window mirror, spec §3).
+    window_binary: str | None = None
 
 
 @dataclass
@@ -219,6 +238,16 @@ class _Applied:
     setpoint: float | None
 
 
+@dataclass
+class _RestoredManual:
+    """A zone's manual state recovered from RestoreEntity on restart (spec §9)."""
+
+    hvac_mode: str
+    preset: str | None
+    custom_setpoint: float | None
+    remaining_min: int | None
+
+
 class ZoneHeatingCoordinator:
     """Drives every zone's state machine and applies it via the backend."""
 
@@ -235,6 +264,18 @@ class ZoneHeatingCoordinator:
         self.zone_runtime: dict[str, ZoneRuntimeState] = {}
         self.manual: dict[str, ZoneManualState] = {}
         self._applied: dict[str, _Applied] = {}
+        # Live ``control_source`` per zone (spec §5), surfaced on the sensor + climate.
+        self._control_source: dict[str, str | None] = {}
+        # Cached global ``in_fallback`` so we only push on a real change (spec §9).
+        self._in_fallback: bool | None = None
+        # Manual state recovered from RestoreEntity, consumed in ``async_setup`` (spec §9).
+        self._restored: dict[str, _RestoredManual] = {}
+        # Per-zone signature of the last-written baseline, loaded from the Store so a
+        # reload only rewrites a baseline that actually changed (spec §8 dedupe).
+        self._store: Store | None = None
+        self._baseline_sigs: dict[str, str] = {}
+        # target / switch entity_id -> zone subentry_ids that use it.
+        self._switch_to_zone: dict[str, list[str]] = {}
         self._mode_entity: str | None = None
         # Last applied master mode (spec §2). Set in ``async_setup``; transitions
         # are driven by ``_async_handle_mode_change``.
@@ -256,6 +297,14 @@ class ZoneHeatingCoordinator:
         exist in the registry and have written their initial state.
         """
         registry = er.async_get(self.hass)
+        # Load the persisted baseline signatures (spec §8 dedupe). Survives reloads
+        # and restarts via ``.storage`` so an unchanged baseline is not rewritten.
+        self._store = Store(
+            self.hass,
+            STORAGE_VERSION,
+            f"{STORAGE_KEY_BASELINES}_{self.entry.entry_id}",
+        )
+        self._baseline_sigs = await self._store.async_load() or {}
         self._mode_entity = registry.async_get_entity_id(
             Platform.SELECT, DOMAIN, KEY_HEATING_MODE
         )
@@ -307,10 +356,16 @@ class ZoneHeatingCoordinator:
                         CONF_OFF_BASELINE_TEMP, DEFAULT_OFF_BASELINE_TEMP
                     )
                 ),
+                schedule_switch=self._resolve_schedule_switch(subentry),
+                window_binary=registry.async_get_entity_id(
+                    Platform.BINARY_SENSOR, DOMAIN, f"{sid}_{KEY_WINDOW_OPEN}"
+                ),
             )
             self.zones[sid] = ctx
             self.zone_runtime.setdefault(sid, ZoneRuntimeState())
-            self.manual.setdefault(sid, ZoneManualState())
+            # Restore the zone's manual state (hvac_mode/preset/Custom) from the
+            # climate entity's RestoreEntity data, or a fresh default (spec §9).
+            self.manual.setdefault(sid, self._initial_manual_state(sid))
 
             for entity_id in (
                 ctx.present_entity,
@@ -319,9 +374,16 @@ class ZoneHeatingCoordinator:
                 ctx.active_number,
                 ctx.standby_schedule,
                 ctx.active_schedule,
+                ctx.window_binary,
             ):
                 if entity_id:
                     tracked.add(entity_id)
+
+            if ctx.schedule_switch:
+                tracked.add(ctx.schedule_switch)
+                self._switch_to_zone.setdefault(
+                    ctx.schedule_switch, []
+                ).append(sid)
 
             for target in ctx.targets:
                 targets.add(target)
@@ -354,6 +416,11 @@ class ZoneHeatingCoordinator:
         self.entry.async_on_unload(self._cancel_all_timers)
         self.entry.async_on_unload(self._cancel_heartbeat)
 
+        # Re-arm restored respect-window / boost timers (spec §9). A heat stand with
+        # a recoverable remaining time keeps its timer; a sticky ``away`` keeps no
+        # timer; anything else whose timer could not be restored drops to ``auto``.
+        self._rearm_restored_timers()
+
         # Apply the current master mode: first setup writes the (derived normal or
         # off) baseline per zone and either starts the state machine (auto),
         # observes (fallback) or turns the zones off (off). (spec §2, §8).
@@ -364,6 +431,69 @@ class ZoneHeatingCoordinator:
     def _cancel_all_timers(self) -> None:
         for sid in list(self.manual):
             self._cancel_timer(sid)
+
+    def _resolve_schedule_switch(self, subentry) -> str | None:
+        """Resolve a zone's ``switch.<zone>_schedule`` (spec §5).
+
+        Uses the explicit config override if set, else derives it from the zone's
+        first target climate (``switch.<object_id>_schedule``, tado_hijack's naming).
+        Returns ``None`` when nothing is resolvable -> ``control_source`` degrades to
+        unknown.
+        """
+        explicit = subentry.data.get(CONF_SCHEDULE_SWITCH)
+        if explicit:
+            return explicit
+        targets = subentry.data.get(CONF_TARGETS) or []
+        if not targets:
+            return None
+        object_id = split_entity_id(targets[0])[1]
+        return f"{SWITCH_DOMAIN}.{object_id}{SCHEDULE_SWITCH_SUFFIX}"
+
+    def _initial_manual_state(self, sid: str) -> ZoneManualState:
+        """Build a zone's initial manual state, honouring a restore (spec §9)."""
+        restored = self._restored.get(sid)
+        if restored is None:
+            return ZoneManualState()
+        return ZoneManualState(
+            hvac_mode=restored.hvac_mode,
+            preset=restored.preset,
+            custom_setpoint=restored.custom_setpoint,
+        )
+
+    def _rearm_restored_timers(self) -> None:
+        """Re-arm respect-window / boost timers for restored heat stands (spec §9)."""
+        for sid, ms in self.manual.items():
+            if ms.hvac_mode != HVAC_HEAT or ms.preset == PRESET_AWAY:
+                continue  # off / auto / sticky-away need no timer
+            restored = self._restored.get(sid)
+            remaining = restored.remaining_min if restored else None
+            if remaining and remaining > 0:
+                self._arm_timer(sid, remaining)
+            else:
+                # Could not restore the timer -> deterministic fall-back to auto.
+                self._to_auto_state(sid)
+
+    def restore_zone_manual(
+        self,
+        sid: str,
+        *,
+        hvac_mode: str,
+        preset: str | None,
+        custom_setpoint: float | None,
+        remaining_min: int | None,
+    ) -> None:
+        """Record a zone's RestoreEntity manual state for ``async_setup`` (spec §9).
+
+        Called by the climate entity from ``async_added_to_hass`` (which runs before
+        the coordinator's ``async_setup``), so the first evaluation uses the restored
+        ``hvac_mode``/preset instead of a cold default.
+        """
+        self._restored[sid] = _RestoredManual(
+            hvac_mode=hvac_mode,
+            preset=preset,
+            custom_setpoint=custom_setpoint,
+            remaining_min=remaining_min,
+        )
 
     # --- triggers -----------------------------------------------------------
     @callback
@@ -376,6 +506,17 @@ class ZoneHeatingCoordinator:
             self.entry.async_create_task(
                 self.hass, self._async_handle_mode_change(), eager_start=False
             )
+            return
+        # A ``switch.<zone>_schedule`` change is a live mirror event: refresh
+        # control_source + in_fallback (spec §5, §9). No overlay is re-asserted
+        # here — the dead-man's-switch heartbeat retakes control in auto (spec §9).
+        switch_zones = self._switch_to_zone.get(entity_id)
+        if switch_zones is not None:
+            for sid in switch_zones:
+                ctx = self.zones.get(sid)
+                if ctx is not None:
+                    self._refresh_control_source(ctx)
+            self._refresh_in_fallback()
             return
         # Stamp presence-change timestamps so the shadow-state can ignore
         # presence-driven underlying changes (spec §5 step 2).
@@ -471,6 +612,18 @@ class ZoneHeatingCoordinator:
         await self.async_refresh()
 
     def zone_hvac_mode(self, sid: str) -> str:
+        """Displayed hvac_mode; an open window shows ``off`` (spec §3).
+
+        The user's chosen mode stays stored in ``manual`` so it resumes when the
+        window closes; only the surfaced value flips to ``off`` while open.
+        """
+        runtime = self.zone_runtime.get(sid)
+        if runtime is not None and runtime.window_open:
+            return HVAC_OFF
+        return self.zone_stored_hvac_mode(sid)
+
+    def zone_stored_hvac_mode(self, sid: str) -> str:
+        """The zone's stored hvac_mode, ignoring the window-open mask (spec §9)."""
         ms = self.manual.get(sid)
         return ms.hvac_mode if ms else HVAC_AUTO
 
@@ -478,6 +631,31 @@ class ZoneHeatingCoordinator:
         """The forced preset in heat (None => Custom)."""
         ms = self.manual.get(sid)
         return ms.preset if ms else None
+
+    def zone_custom_setpoint(self, sid: str) -> float | None:
+        """The Custom (manually dialed) setpoint, if any (spec §9 restore)."""
+        ms = self.manual.get(sid)
+        return ms.custom_setpoint if ms else None
+
+    def zone_control_source(self, sid: str) -> str | None:
+        """Live ``control_source`` for a zone (ha_overlay/tado_schedule/unknown)."""
+        return self._control_source.get(sid)
+
+    def in_fallback(self) -> bool:
+        """Global ``heating_in_fallback`` (spec §1.2, §9).
+
+        True when the master mode is ``fallback`` (zones intentionally on the Tado
+        schedule), or when — in ``auto`` — at least one zone is actually on its Tado
+        schedule while HA expects to hold an overlay (an unexpected fallback).
+        """
+        if self._mode == MODE_FALLBACK:
+            return True
+        if self._mode != MODE_AUTO:
+            return False
+        for ctx in self.zones.values():
+            if self._schedule_switch_state(ctx) == STATE_ON:
+                return True
+        return False
 
     def zone_override_active(self, sid: str) -> bool:
         """True while a manual heat stand is in effect (spec §4)."""
@@ -598,6 +776,11 @@ class ZoneHeatingCoordinator:
         else:
             await self._enter_auto(write_baseline=from_off_or_initial)
         self._manage_heartbeat()
+        # The mode itself changes the live mirror (Fallback/Off pin tado_schedule,
+        # spec §5) and the fallback flag; refresh both after enacting it.
+        for ctx in self.zones.values():
+            self._refresh_control_source(ctx)
+        self._refresh_in_fallback()
 
     async def _enter_auto(self, *, write_baseline: bool) -> None:
         """Master mode auto: (re)write the normal baseline, run the machine."""
@@ -642,9 +825,28 @@ class ZoneHeatingCoordinator:
         ):
             self._to_auto_state(sid)
 
-        hvac = ms.hvac_mode
         present = self._read_binary(ctx.present_entity)
+        window_open = self._read_binary(ctx.window_binary)
 
+        # Window-open is the safety modifier on top (spec §3): the zone goes off
+        # and shows ``Window-open`` regardless of hvac_mode. The user's chosen mode
+        # stays stored in ``ms`` and resumes when the window closes (after its
+        # close-delay debounce, handled by ``binary_sensor.<zone>_window_open``).
+        if window_open:
+            decision = ZoneDecision(
+                stand=STAND_WINDOW_OPEN,
+                setpoint=None,
+                preset_mode=None,
+                off=True,
+            )
+            await self._apply(ctx, decision)
+            self._update_runtime(
+                ctx, decision, present=present, window_open=True
+            )
+            self._refresh_control_source(ctx)
+            return
+
+        hvac = ms.hvac_mode
         if hvac == HVAC_OFF:
             decision = ZoneDecision(
                 stand=STAND_OFF, setpoint=None, preset_mode=None, off=True
@@ -653,9 +855,10 @@ class ZoneHeatingCoordinator:
             self._update_runtime(
                 ctx, decision, present=present, window_open=False
             )
+            self._refresh_control_source(ctx)
             return
 
-        inp = self._build_inputs(ctx, ms)
+        inp = self._build_inputs(ctx, ms, present=present, window_open=window_open)
         if inp is None:
             LOGGER.debug("Zone %s not ready for evaluation", ctx.name)
             return
@@ -664,6 +867,7 @@ class ZoneHeatingCoordinator:
         self._update_runtime(
             ctx, decision, present=inp.present, window_open=inp.window_open
         )
+        self._refresh_control_source(ctx)
 
     async def _apply(self, ctx: ZoneContext, decision: ZoneDecision) -> None:
         """Send to the backend only when the setpoint/off state changes."""
@@ -672,10 +876,19 @@ class ZoneHeatingCoordinator:
             # value, or a missing boost_temp): nothing safe to write.
             LOGGER.debug("Zone %s has no setpoint to apply", ctx.name)
             return
+        sid = ctx.subentry_id
         want = _Applied(off=decision.off, setpoint=decision.setpoint)
-        if self._applied.get(ctx.subentry_id) == want:
+        ms = self.manual[sid]
+        if sid not in self._applied and self._device_matches(ctx, want):
+            # First application this session (e.g. after a restart): the device
+            # already holds the desired state, so adopt it without a redundant
+            # write (spec §9: "alleen schrijven als het doel-setpoint afwijkt").
+            self._applied[sid] = want
+            if not want.off and want.setpoint is not None:
+                ms.last_commanded_setpoint = want.setpoint
             return
-        ms = self.manual[ctx.subentry_id]
+        if self._applied.get(sid) == want:
+            return
         termination = self._overlay_termination()
         if decision.off:
             await self.backend.set_off(ctx.targets, termination)
@@ -728,7 +941,11 @@ class ZoneHeatingCoordinator:
     # --- dead-man's-switch heartbeat (spec §7) ------------------------------
     def _manage_heartbeat(self) -> None:
         """Arm/disarm the heartbeat: only in auto with the dead-man's-switch on."""
-        want = self._mode == MODE_AUTO and self._dead_mans_switch()
+        want = (
+            self._mode == MODE_AUTO
+            and self._dead_mans_switch()
+            and bool(self.zones)
+        )
         if want and self._heartbeat_cancel is None:
             self._heartbeat_cancel = async_track_time_interval(
                 self.hass,
@@ -803,18 +1020,47 @@ class ZoneHeatingCoordinator:
             return
         day_blocks = await self._async_read_standby_day_blocks(ctx)
         baseline = derive_normal_baseline(day_blocks, base)
-        if ctx.targets:
-            await self.backend.set_schedule(
-                ctx.targets, baseline.timetable, list(baseline.blocks)
-            )
+        await self._async_write_baseline_if_changed(ctx, baseline)
 
     async def _async_write_off_baseline(self, ctx: ZoneContext) -> None:
         """Write the flat off/frost-protection baseline for one zone (spec §8)."""
         baseline = off_baseline(ctx.off_baseline_temp)
-        if ctx.targets:
-            await self.backend.set_schedule(
-                ctx.targets, baseline.timetable, list(baseline.blocks)
+        await self._async_write_baseline_if_changed(ctx, baseline)
+
+    @staticmethod
+    def _baseline_signature(baseline: BaselineTimetable) -> str:
+        """A stable signature of a baseline, for the write-dedupe (spec §8)."""
+        return json.dumps(
+            {"t": baseline.timetable, "b": list(baseline.blocks)},
+            sort_keys=True,
+            default=str,
+        )
+
+    async def _async_write_baseline_if_changed(
+        self, ctx: ZoneContext, baseline: BaselineTimetable
+    ) -> None:
+        """Write a baseline only when it changed from the last one (spec §8).
+
+        The per-zone signature is persisted in the Store, so a reload/restart with
+        an unchanged baseline makes no needless Tado-cloud ``set_schedule`` call
+        (fixes the F4 note that every reload re-wrote the baseline).
+        """
+        if not ctx.targets:
+            return
+        sid = ctx.subentry_id
+        signature = self._baseline_signature(baseline)
+        if self._baseline_sigs.get(sid) == signature:
+            LOGGER.debug(
+                "Zone %s baseline unchanged, skipping set_schedule (spec §8)",
+                ctx.name,
             )
+            return
+        await self.backend.set_schedule(
+            ctx.targets, baseline.timetable, list(baseline.blocks)
+        )
+        self._baseline_sigs[sid] = signature
+        if self._store is not None:
+            await self._store.async_save(self._baseline_sigs)
 
     async def _async_read_standby_day_blocks(
         self, ctx: ZoneContext
@@ -863,6 +1109,7 @@ class ZoneHeatingCoordinator:
         ms = self.manual.get(sid)
         if ms is None:
             return
+        ctx = self.zones.get(sid)
         now = dt_util.utcnow()
         ha_just = (
             ms.last_command_at is not None
@@ -874,16 +1121,27 @@ class ZoneHeatingCoordinator:
             and (now - ms.presence_change_at).total_seconds()
             < PRESENCE_DEBOUNCE_SECONDS
         )
+        # Expected schedule fallback (spec §5 step 3): the zone follows its Tado
+        # schedule (``switch.<zone>_schedule`` = on), so an underlying setpoint change
+        # is the schedule — not a manual knob turn (a knob turn would create an
+        # overlay and flip the switch off). A manual Custom is therefore impossible
+        # while the switch is on.
+        expected_fallback = (
+            ctx is not None and self._schedule_switch_state(ctx) == STATE_ON
+        )
         decision = detect_custom_change(
             OverrideInputs(
                 reported_setpoint=reported,
                 last_commanded_setpoint=ms.last_commanded_setpoint,
                 ha_just_commanded=ha_just,
                 presence_change_recent=presence_recent,
-                # switch.<zone>_schedule wiring is F4/F5 (spec §5 step 3).
-                is_expected_schedule_fallback=False,
+                is_expected_schedule_fallback=expected_fallback,
             )
         )
+        # The switch may just have flipped to on (overlay expiry): keep the live
+        # mirror accurate (spec §5 -> control_source = tado_schedule).
+        if ctx is not None:
+            self._refresh_control_source(ctx)
         if not decision.is_manual_custom:
             return
         # Enter Custom: hvac_mode=heat, preset=none, hold the reported value,
@@ -900,6 +1158,72 @@ class ZoneHeatingCoordinator:
         self._start_stand_timer(sid)
         await self.async_refresh()
         self._notify(sid)
+
+    # --- control_source / in_fallback (spec §5, §9) -------------------------
+    def _schedule_switch_state(self, ctx: ZoneContext) -> str | None:
+        """Raw state of a zone's ``switch.<zone>_schedule`` (or None)."""
+        if not ctx.schedule_switch:
+            return None
+        state = self.hass.states.get(ctx.schedule_switch)
+        return state.state if state else None
+
+    def _compute_control_source(self, ctx: ZoneContext) -> str | None:
+        """Live mirror of the schedule switch (spec §5).
+
+        ``switch`` off -> ``ha_overlay``; on -> ``tado_schedule``; unresolvable ->
+        unknown (``None``). In master mode Fallback/Off it stays ``tado_schedule``
+        on purpose (spec §5: "In master-stand Fallback/Off blijft hij bewust
+        tado_schedule").
+        """
+        if self._mode in (MODE_FALLBACK, MODE_OFF):
+            return CONTROL_SOURCE_TADO_SCHEDULE
+        state = self._schedule_switch_state(ctx)
+        if state in _UNREADY:
+            return None
+        if state == STATE_ON:
+            return CONTROL_SOURCE_TADO_SCHEDULE
+        return CONTROL_SOURCE_HA_OVERLAY
+
+    def _refresh_control_source(self, ctx: ZoneContext) -> None:
+        """Recompute a zone's control_source; notify its entities on a change."""
+        value = self._compute_control_source(ctx)
+        sid = ctx.subentry_id
+        if self._control_source.get(sid) != value:
+            self._control_source[sid] = value
+            self._notify(sid)
+
+    def _refresh_in_fallback(self) -> None:
+        """Recompute the global in_fallback flag; push on a change (spec §9)."""
+        value = self.in_fallback()
+        if self._in_fallback != value:
+            self._in_fallback = value
+            async_dispatcher_send(self.hass, SIGNAL_GLOBAL_UPDATE)
+
+    # --- device state (restart redundancy guard, spec §9) ------------------
+    def _device_current(self, ctx: ZoneContext) -> _Applied | None:
+        """Best-effort read of a zone's current applied state from its targets."""
+        for target in ctx.targets:
+            state = self.hass.states.get(target)
+            if state is None or state.state in _UNREADY:
+                continue
+            if state.state == HVAC_OFF:
+                return _Applied(off=True, setpoint=None)
+            setpoint = self._extract_setpoint(state)
+            if setpoint is not None:
+                return _Applied(off=False, setpoint=setpoint)
+            return _Applied(off=False, setpoint=None)
+        return None
+
+    def _device_matches(self, ctx: ZoneContext, want: _Applied) -> bool:
+        """True when the device already holds the desired state (within tolerance)."""
+        current = self._device_current(ctx)
+        if current is None or current.off != want.off:
+            return False
+        if want.off:
+            return True
+        if current.setpoint is None or want.setpoint is None:
+            return False
+        return abs(current.setpoint - want.setpoint) <= _SETPOINT_TOLERANCE
 
     # --- state reads --------------------------------------------------------
     def _master_mode(self) -> str | None:
@@ -934,7 +1258,12 @@ class ZoneHeatingCoordinator:
             return None
 
     def _build_inputs(
-        self, ctx: ZoneContext, ms: ZoneManualState
+        self,
+        ctx: ZoneContext,
+        ms: ZoneManualState,
+        *,
+        present: bool,
+        window_open: bool,
     ) -> AutoInputs | None:
         away = self._read_number(ctx.away_number)
         standby = self._read_number(ctx.standby_number)
@@ -942,10 +1271,12 @@ class ZoneHeatingCoordinator:
         if away is None or standby is None or active is None:
             return None
         return AutoInputs(
-            # Window-sensor wiring is F5; the engine already supports it.
-            window_open=False,
+            # Real window state (spec §3). The coordinator already short-circuits an
+            # open window above (safety, across all hvac modes), so this is False
+            # here; passing it keeps the engine's auto window-branch consistent.
+            window_open=window_open,
             home_present=self._read_binary(self._home_present_entity),
-            present=self._read_binary(ctx.present_entity),
+            present=present,
             away_temp=away,
             standby_temp=standby,
             active_temp=active,
