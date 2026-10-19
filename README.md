@@ -54,16 +54,16 @@ HA-agnostic `engine/` package so it can be unit-tested in isolation.
 
 ### Via HACS (custom repository)
 
-1. In HACS, add this repository as a **custom repository** with category
-   *Integration*.
+1. In HACS, add `https://github.com/d-bunschoten/zone_heating` as a **custom
+   repository** with category *Integration*.
 2. Install **Zone Heating**.
 3. Restart Home Assistant.
 4. Go to **Settings → Devices & Services → Add Integration** and search for
    *Zone Heating*.
 
-> The repository is currently local and not yet published on GitHub, so the
-> `documentation`/`issue_tracker` links in `manifest.json` are placeholders.
-> Replace them (and point HACS at the real repo) once it is published.
+> The repository is **private**. HACS needs access (a GitHub token / membership
+> that can read it) to install from it, and the GitHub Actions badges/links only
+> resolve for users who can see the repo.
 
 ### Manual
 

@@ -1,13 +1,13 @@
 {
   "domain": "zone_heating",
   "name": "Zone Heating",
-  "codeowners": ["@dariob"],
+  "codeowners": ["@d-bunschoten"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/dariob/zone_heating",
+  "documentation": "https://github.com/d-bunschoten/zone_heating",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/dariob/zone_heating/issues",
+  "issue_tracker": "https://github.com/d-bunschoten/zone_heating/issues",
   "requirements": [],
   "version": "0.1.0"
 }
