@@ -1,0 +1,191 @@
+# =============================================================================
+# Zone Heating — voorbeeld-Lovelace-dashboard
+# =============================================================================
+#
+# Dit is een VOORBEELD, geen onderdeel van de integratie. De spec kiest bewust
+# voor standaard `thermostat`-kaarten + een config-sectie met de losse
+# helper-entiteiten, en expliciet GEEN custom-kaart (spec §4 en §10, besluit 6).
+#
+# Installeren — twee manieren:
+#
+#   1) Snel proberen (aanrader):
+#      Instellingen → Dashboards → "+ Dashboard toevoegen" → "Nieuw dashboard
+#      vanaf nul" → open het dashboard → menu (rechtsboven, 3 puntjes) →
+#      "Onbewerkte configuratie-editor" (raw config editor) → plak de volledige
+#      inhoud van dit bestand (vanaf `title:` hieronder) en sla op.
+#
+#   2) Als YAML-dashboard, vast in `configuration.yaml`:
+#
+#        lovelace:
+#          mode: storage          # bestaande UI-dashboards blijven werken
+#          dashboards:
+#            zone-heating:
+#              mode: yaml
+#              title: Verwarming
+#              icon: mdi:radiator
+#              filename: dashboards/zone_heating.yaml
+#              show_in_sidebar: true
+#
+#      Let op: bij een YAML-dashboard laadt HA exact DIT bestand. Pas na een
+#      herstart (of "YAML opnieuw laden" → Lovelace) verschijnt het.
+#
+# -----------------------------------------------------------------------------
+# ZONES ZIJN DYNAMISCH
+# -----------------------------------------------------------------------------
+# De integratie heeft GEEN vaste zones. Elke zone voeg je los toe via de
+# config-/options-flow; HA leidt de entity-id's af van de ZONENAAM (het
+# object_id van het zone-device). Een zone "Woonkamer" levert dus:
+#
+#     climate.woonkamer
+#     number.woonkamer_away_temp / _standby_temp / _active_temp
+#     sensor.woonkamer_control_source
+#     binary_sensor.woonkamer_present / _window_open
+#
+# De GLOBALE entiteiten hebben wél vaste namen (select.heating_mode, de
+# number.heating_* en de binary_sensor.heating_*) — die staan één keer bovenaan.
+#
+# Hieronder staan twee voorbeeldzones (woonkamer, keuken) zodat de replicatie
+# duidelijk is. EEN EXTRA ZONE TOEVOEGEN:
+#   1. Kopieer één heel `horizontal_stack`-blok uit de lijst `cards:` hieronder.
+#   2. Vervang overal het zone-deel van de entity-id (bv. `woonkamer` →
+#      `slaapkamer`). Let op de naam-naar-id-regel van HA: spaties en hoofd-
+#      letters worden kleine letters met underscores ("Zolder voor" →
+#      `zolder_voor`). Twijfel je? Instellingen → Entiteiten laat de exacte
+#      entity-id per zone zien.
+#   3. Heeft de zone géén schedule-helpers (die zijn optioneel, zie onder), laat
+#      dan die twee `schedule.*`-rijen weg.
+# =============================================================================
+
+title: Verwarming
+views:
+  - title: Verwarming
+    path: verwarming
+    icon: mdi:radiator
+    # Een enkele kolom met secties; `grid` + `horizontal_stack` zetten per zone
+    # de thermostaat en de config-kaart naast elkaar.
+    cards:
+      # -----------------------------------------------------------------------
+      # GLOBALE SECTIE — vaste entity-id's, één keer voor het hele huis.
+      # select = master-stand; de number.heating_* zijn de globale knoppen;
+      # de binary_sensor.heating_* zijn alleen-lezen status.
+      # -----------------------------------------------------------------------
+      - type: entities
+        title: Verwarming — globaal
+        show_header_toggle: false
+        state_color: true
+        entities:
+          - entity: select.heating_mode
+            name: Master-stand (auto / fallback / off)
+          - type: section
+            label: Boost & override
+          - entity: number.heating_boost_temp
+            name: Boost-temperatuur
+          - entity: number.heating_boost_duration
+            name: Boost-duur
+          - entity: number.heating_override_timeout
+            name: Override-timeout
+          - type: section
+            label: Status (alleen-lezen)
+          - entity: binary_sensor.heating_home_present
+            name: Iemand thuis
+          - entity: binary_sensor.heating_in_fallback
+            name: In fallback
+
+      # =======================================================================
+      # ZONE: WOONKAMER  (sjabloon — kopieer dit hele blok per extra zone)
+      # =======================================================================
+      - type: horizontal_stack
+        cards:
+          # --- Dagelijks bedienen: standaard thermostaat-kaart (spec §4) ------
+          - type: thermostat
+            entity: climate.woonkamer
+            name: Woonkamer
+            features:
+              - type: climate-hvac-modes
+                hvac_modes:
+                  - 'off'
+                  - heat
+                  - auto
+              - type: climate-preset-modes
+                style: dropdown
+                preset_modes:
+                  - away
+                  - standby
+                  - active
+                  - boost
+          # --- Config-sectie: de "dagelijkse knoppen" + alleen-lezen status ---
+          - type: entities
+            title: Woonkamer — instellingen
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - type: section
+                label: Setpoints per stand
+              - entity: number.woonkamer_away_temp
+                name: Away-temp
+              - entity: number.woonkamer_standby_temp
+                name: Standby-temp
+              - entity: number.woonkamer_active_temp
+                name: Active-temp
+              # Schedule-helpers zijn OPTIONEEL: ze bestaan alleen als je ze zelf
+              # als `schedule`-helper hebt aangemaakt én aan de zone hebt
+              # gekoppeld. Heeft deze zone ze niet, verwijder dan deze sectie.
+              - type: section
+                label: Schema's (optioneel)
+              - entity: schedule.woonkamer_standby_schedule
+                name: Standby-schema
+              - entity: schedule.woonkamer_active_schedule
+                name: Active-schema (poort)
+              - type: section
+                label: Status (alleen-lezen)
+              - entity: sensor.woonkamer_control_source
+                name: Bron (HA-overlay / Tado-schema)
+              - entity: binary_sensor.woonkamer_present
+                name: Aanwezig
+              - entity: binary_sensor.woonkamer_window_open
+                name: Raam open
+
+      # =======================================================================
+      # ZONE: KEUKEN  (tweede voorbeeld — zelfde blok, andere zone-id)
+      # Deze zone heeft in dit voorbeeld GEEN schedule-helpers; daarom staan de
+      # `schedule.*`-rijen hier niet.
+      # =======================================================================
+      - type: horizontal_stack
+        cards:
+          - type: thermostat
+            entity: climate.keuken
+            name: Keuken
+            features:
+              - type: climate-hvac-modes
+                hvac_modes:
+                  - 'off'
+                  - heat
+                  - auto
+              - type: climate-preset-modes
+                style: dropdown
+                preset_modes:
+                  - away
+                  - standby
+                  - active
+                  - boost
+          - type: entities
+            title: Keuken — instellingen
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - type: section
+                label: Setpoints per stand
+              - entity: number.keuken_away_temp
+                name: Away-temp
+              - entity: number.keuken_standby_temp
+                name: Standby-temp
+              - entity: number.keuken_active_temp
+                name: Active-temp
+              - type: section
+                label: Status (alleen-lezen)
+              - entity: sensor.keuken_control_source
+                name: Bron (HA-overlay / Tado-schema)
+              - entity: binary_sensor.keuken_present
+                name: Aanwezig
+              - entity: binary_sensor.keuken_window_open
+                name: Raam open
