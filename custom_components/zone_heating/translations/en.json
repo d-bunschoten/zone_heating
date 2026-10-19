@@ -23,6 +23,15 @@
           "dead_mans_switch": "Dead-man's-switch",
           "overlay_termination": "Overlay termination",
           "overlay_timer_duration": "Overlay timer duration (minutes)"
+        },
+        "data_description": {
+          "home_presence_entity": "Entity that signals someone is home; drives Away for the whole house. Leave empty to keep the house always 'home' so Away never triggers.",
+          "home_presence_template": "Template alternative to the home presence entity; it must render a truthy value while someone is home.",
+          "home_on_delay": "Minutes a home-present signal must persist before the house counts as occupied.",
+          "home_off_delay": "Minutes the house keeps counting as occupied after everyone has left.",
+          "dead_mans_switch": "When on, Home Assistant re-asserts its overlays on a heartbeat so a crashed HA lets the thermostat fall back to its own schedule.",
+          "overlay_termination": "How a Home Assistant overlay ends: at the next schedule block, or after a fixed timer.",
+          "overlay_timer_duration": "Timer length used when overlay termination is set to 'Fixed timer'."
         }
       }
     }
@@ -53,6 +62,21 @@
             "standby_schedule": "Standby schedule helper",
             "active_schedule": "Active schedule helper",
             "off_baseline_temp": "Off / frost-protection temperature (°C)"
+          },
+          "data_description": {
+            "name": "Display name for the zone; becomes the device and the climate entity name.",
+            "targets": "One or more climate entities this zone drives together. For a Tado room, pick the room thermostat; it cascades to its TRVs.",
+            "presence_entity": "Entity whose state signals that someone is in this zone (person, motion, device tracker, …).",
+            "presence_template": "Template alternative to the presence entity; it must render a truthy value when the zone is occupied.",
+            "on_delay": "Minutes a presence signal must persist before the zone counts as occupied.",
+            "off_delay": "Minutes the zone keeps counting as occupied after presence drops, to avoid flapping.",
+            "window_sensor": "Binary sensor that reports an open window or door for this zone.",
+            "window_open_delay": "Minutes an open window must persist before heating is cut. 0 reacts immediately (safety).",
+            "window_close_delay": "Minutes to wait after the window closes before the zone resumes its mode.",
+            "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive switch.<target>_schedule from the first target. You create the schedule helpers yourself.",
+            "standby_schedule": "Optional schedule helper that varies the standby temperature per time block; create it yourself under Settings → Devices & Services → Helpers.",
+            "active_schedule": "Optional schedule helper that varies the active temperature per block and gates when Active is allowed.",
+            "off_baseline_temp": "Frost-protection setpoint written to the thermostat while the master mode is Off."
           }
         },
         "reconfigure": {
@@ -72,6 +96,21 @@
             "standby_schedule": "Standby schedule helper",
             "active_schedule": "Active schedule helper",
             "off_baseline_temp": "Off / frost-protection temperature (°C)"
+          },
+          "data_description": {
+            "name": "Display name for the zone; becomes the device and the climate entity name.",
+            "targets": "One or more climate entities this zone drives together. For a Tado room, pick the room thermostat; it cascades to its TRVs.",
+            "presence_entity": "Entity whose state signals that someone is in this zone (person, motion, device tracker, …).",
+            "presence_template": "Template alternative to the presence entity; it must render a truthy value when the zone is occupied.",
+            "on_delay": "Minutes a presence signal must persist before the zone counts as occupied.",
+            "off_delay": "Minutes the zone keeps counting as occupied after presence drops, to avoid flapping.",
+            "window_sensor": "Binary sensor that reports an open window or door for this zone.",
+            "window_open_delay": "Minutes an open window must persist before heating is cut. 0 reacts immediately (safety).",
+            "window_close_delay": "Minutes to wait after the window closes before the zone resumes its mode.",
+            "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive switch.<target>_schedule from the first target. You create the schedule helpers yourself.",
+            "standby_schedule": "Optional schedule helper that varies the standby temperature per time block; create it yourself under Settings → Devices & Services → Helpers.",
+            "active_schedule": "Optional schedule helper that varies the active temperature per block and gates when Active is allowed.",
+            "off_baseline_temp": "Frost-protection setpoint written to the thermostat while the master mode is Off."
           }
         }
       }

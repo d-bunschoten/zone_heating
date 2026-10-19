@@ -22,10 +22,10 @@ Restart-persistence of a running timer / the manual state is F5.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Callable
 
 from homeassistant.const import (
     ATTR_ENTITY_ID,

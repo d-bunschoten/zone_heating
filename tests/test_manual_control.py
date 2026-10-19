@@ -21,7 +21,6 @@ from homeassistant.components.climate import (
 from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.util import dt as dt_util
 
 from custom_components.zone_heating.backend_tado import (
     ATTR_HVAC_MODE,

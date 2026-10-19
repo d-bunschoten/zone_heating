@@ -1,0 +1,146 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zone Heating",
+        "description": "Stel de Zone Heating-hub in. Klik op Verzenden om de integratie aan te maken. Voeg daarna verwarmingszones toe vanuit de configuratie van de hub."
+      }
+    },
+    "abort": {
+      "already_configured": "Al geconfigureerd. Er is maar één Zone Heating-hub toegestaan."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Globale verwarmingsinstellingen",
+        "description": "Huis-aanwezigheid, dempingsvertragingen, dead-man's-switch en overlay-terminatie.",
+        "data": {
+          "home_presence_entity": "Entiteit huis-aanwezigheid",
+          "home_presence_template": "Template huis-aanwezigheid",
+          "home_on_delay": "Aan-vertraging huis-aanwezigheid (minuten)",
+          "home_off_delay": "Uit-vertraging huis-aanwezigheid (minuten)",
+          "dead_mans_switch": "Dead-man's-switch",
+          "overlay_termination": "Overlay-terminatie",
+          "overlay_timer_duration": "Duur overlay-timer (minuten)"
+        },
+        "data_description": {
+          "home_presence_entity": "Entiteit die aangeeft dat er iemand thuis is; stuurt Away voor het hele huis. Laat leeg om het huis altijd op 'thuis' te houden, zodat Away nooit optreedt.",
+          "home_presence_template": "Template-alternatief voor de aanwezigheidsentiteit; moet een waar-waarde opleveren zolang er iemand thuis is.",
+          "home_on_delay": "Aantal minuten dat een thuis-signaal moet aanhouden voordat het huis als bezet telt.",
+          "home_off_delay": "Aantal minuten dat het huis als bezet blijft tellen nadat iedereen is vertrokken.",
+          "dead_mans_switch": "Indien aan houdt Home Assistant zijn overlays met een hartslag in stand, zodat een gecrashte HA de thermostaat naar zijn eigen schema laat terugvallen.",
+          "overlay_termination": "Hoe een Home Assistant-overlay eindigt: bij het volgende schemablok of na een vaste timer.",
+          "overlay_timer_duration": "Duur van de timer wanneer overlay-terminatie op 'Vaste timer' staat."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "zone": {
+      "title": "Verwarmingszone",
+      "entry_type": "Verwarmingszone",
+      "initiate_flow": {
+        "user": "Verwarmingszone toevoegen",
+        "reconfigure": "Verwarmingszone herconfigureren"
+      },
+      "step": {
+        "user": {
+          "title": "Verwarmingszone toevoegen",
+          "description": "Een zone groepeert één of meer climate-doelentiteiten en stuurt ze samen aan.",
+          "data": {
+            "name": "Naam",
+            "targets": "Climate-doelentiteiten",
+            "presence_entity": "Aanwezigheidsentiteit",
+            "presence_template": "Aanwezigheidstemplate",
+            "on_delay": "Aan-vertraging aanwezigheid (minuten)",
+            "off_delay": "Uit-vertraging aanwezigheid (minuten)",
+            "window_sensor": "Raamsensor",
+            "window_open_delay": "Open-vertraging raam (minuten)",
+            "window_close_delay": "Dicht-vertraging raam (minuten)",
+            "schedule_switch": "Tado-schemaschakelaar (optioneel)",
+            "standby_schedule": "Standby-schemahelper",
+            "active_schedule": "Actief-schemahelper",
+            "off_baseline_temp": "Uit- / vorstbeveiligingstemperatuur (°C)"
+          },
+          "data_description": {
+            "name": "Weergavenaam voor de zone; wordt de naam van het device en de climate-entiteit.",
+            "targets": "Eén of meer climate-entiteiten die deze zone samen aanstuurt. Kies voor een Tado-kamer het kamer-thermostaat; dat cascadeert naar de TRV's.",
+            "presence_entity": "Entiteit waarvan de status aangeeft dat er iemand in deze zone is (persoon, beweging, device tracker, …).",
+            "presence_template": "Template-alternatief voor de aanwezigheidsentiteit; moet een waar-waarde opleveren als de zone bezet is.",
+            "on_delay": "Aantal minuten dat een aanwezigheidssignaal moet aanhouden voordat de zone als bezet telt.",
+            "off_delay": "Aantal minuten dat de zone als bezet blijft tellen nadat aanwezigheid wegvalt, om pendelen te voorkomen.",
+            "window_sensor": "Binaire sensor die een open raam of deur voor deze zone meldt.",
+            "window_open_delay": "Aantal minuten dat een open raam moet aanhouden voordat de verwarming wordt afgeschakeld. 0 reageert direct (veiligheid).",
+            "window_close_delay": "Aantal minuten wachten nadat het raam dicht is voordat de zone zijn stand hervat.",
+            "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om switch.<doel>_schedule af te leiden uit het eerste doel. De schemahelpers maak je zelf aan.",
+            "standby_schedule": "Optionele schemahelper die de standby-temperatuur per tijdblok laat variëren; maak je zelf aan via Instellingen → Apparaten en diensten → Helpers.",
+            "active_schedule": "Optionele schemahelper die de actief-temperatuur per blok laat variëren en bepaalt wanneer Actief is toegestaan.",
+            "off_baseline_temp": "Vorstbeveiligings-setpoint dat naar de thermostaat wordt geschreven terwijl de master-stand Off is."
+          }
+        },
+        "reconfigure": {
+          "title": "Verwarmingszone herconfigureren",
+          "description": "Wijzig de doelen en instellingen van de zone.",
+          "data": {
+            "name": "Naam",
+            "targets": "Climate-doelentiteiten",
+            "presence_entity": "Aanwezigheidsentiteit",
+            "presence_template": "Aanwezigheidstemplate",
+            "on_delay": "Aan-vertraging aanwezigheid (minuten)",
+            "off_delay": "Uit-vertraging aanwezigheid (minuten)",
+            "window_sensor": "Raamsensor",
+            "window_open_delay": "Open-vertraging raam (minuten)",
+            "window_close_delay": "Dicht-vertraging raam (minuten)",
+            "schedule_switch": "Tado-schemaschakelaar (optioneel)",
+            "standby_schedule": "Standby-schemahelper",
+            "active_schedule": "Actief-schemahelper",
+            "off_baseline_temp": "Uit- / vorstbeveiligingstemperatuur (°C)"
+          },
+          "data_description": {
+            "name": "Weergavenaam voor de zone; wordt de naam van het device en de climate-entiteit.",
+            "targets": "Eén of meer climate-entiteiten die deze zone samen aanstuurt. Kies voor een Tado-kamer het kamer-thermostaat; dat cascadeert naar de TRV's.",
+            "presence_entity": "Entiteit waarvan de status aangeeft dat er iemand in deze zone is (persoon, beweging, device tracker, …).",
+            "presence_template": "Template-alternatief voor de aanwezigheidsentiteit; moet een waar-waarde opleveren als de zone bezet is.",
+            "on_delay": "Aantal minuten dat een aanwezigheidssignaal moet aanhouden voordat de zone als bezet telt.",
+            "off_delay": "Aantal minuten dat de zone als bezet blijft tellen nadat aanwezigheid wegvalt, om pendelen te voorkomen.",
+            "window_sensor": "Binaire sensor die een open raam of deur voor deze zone meldt.",
+            "window_open_delay": "Aantal minuten dat een open raam moet aanhouden voordat de verwarming wordt afgeschakeld. 0 reageert direct (veiligheid).",
+            "window_close_delay": "Aantal minuten wachten nadat het raam dicht is voordat de zone zijn stand hervat.",
+            "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om switch.<doel>_schedule af te leiden uit het eerste doel. De schemahelpers maak je zelf aan.",
+            "standby_schedule": "Optionele schemahelper die de standby-temperatuur per tijdblok laat variëren; maak je zelf aan via Instellingen → Apparaten en diensten → Helpers.",
+            "active_schedule": "Optionele schemahelper die de actief-temperatuur per blok laat variëren en bepaalt wanneer Actief is toegestaan.",
+            "off_baseline_temp": "Vorstbeveiligings-setpoint dat naar de thermostaat wordt geschreven terwijl de master-stand Off is."
+          }
+        }
+      }
+    }
+  },
+  "selector": {
+    "overlay_termination": {
+      "options": {
+        "next_block": "Volgend schemablok",
+        "timer": "Vaste timer"
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "heating_mode": {
+        "state": {
+          "auto": "Auto",
+          "fallback": "Fallback",
+          "off": "Off"
+        }
+      }
+    },
+    "sensor": {
+      "control_source": {
+        "state": {
+          "ha_overlay": "HA overlay",
+          "tado_schedule": "Tado schedule"
+        }
+      }
+    }
+  }
+}
