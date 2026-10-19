@@ -853,12 +853,21 @@ class ZoneHeatingCoordinator:
         # normal baseline; first setup into Off / entering Off writes the off one.
         # (``previous is None`` is first setup; it is never ``MODE_OFF``.)
         from_off_or_initial = previous is None or previous == MODE_OFF
+        # A live master switch (not first setup/reload) is the top-level control:
+        # -> Off puts every zone in off; -> Auto/Fallback returns every zone to auto
+        # (spec §2/§4). On setup (previous is None) the restored per-zone modes are
+        # kept instead, so a restart does not wipe a zone's manual stand.
+        reset_zones = previous is not None
         if mode == MODE_OFF:
             await self._enter_off(write_baseline=previous != MODE_OFF)
         elif mode == MODE_FALLBACK:
-            await self._enter_fallback(write_baseline=from_off_or_initial)
+            await self._enter_fallback(
+                write_baseline=from_off_or_initial, reset_zones=reset_zones
+            )
         else:
-            await self._enter_auto(write_baseline=from_off_or_initial)
+            await self._enter_auto(
+                write_baseline=from_off_or_initial, reset_zones=reset_zones
+            )
         self._manage_heartbeat()
         # The mode itself changes the live mirror (Fallback/Off pin tado_schedule,
         # spec §5) and the fallback flag; refresh both after enacting it.
@@ -866,15 +875,34 @@ class ZoneHeatingCoordinator:
             self._refresh_control_source(ctx)
         self._refresh_in_fallback()
 
-    async def _enter_auto(self, *, write_baseline: bool) -> None:
-        """Master mode auto: (re)write the normal baseline, run the machine."""
+    async def _enter_auto(
+        self, *, write_baseline: bool, reset_zones: bool = False
+    ) -> None:
+        """Master mode auto: (re)write the normal baseline, run the machine.
+
+        ``reset_zones`` (a live switch into Auto) returns every zone to ``auto``,
+        dropping any per-zone manual stand — the master switch is the top-level
+        control (spec §2/§4). On setup/reload it is False so restored modes stay.
+        """
+        if reset_zones:
+            for sid in self.manual:
+                self._to_auto_state(sid)
         if write_baseline:
             for ctx in self.zones.values():
                 await self._async_write_normal_baseline(ctx)
         await self.async_refresh()
 
-    async def _enter_fallback(self, *, write_baseline: bool) -> None:
-        """Master mode fallback: stop asserting overlays, just observe (spec §2)."""
+    async def _enter_fallback(
+        self, *, write_baseline: bool, reset_zones: bool = False
+    ) -> None:
+        """Master mode fallback: stop asserting overlays, just observe (spec §2).
+
+        ``reset_zones`` (a live switch into Fallback) returns every zone to ``auto``
+        so none stays stuck in a prior ``off``/manual stand while HA observes.
+        """
+        if reset_zones:
+            for sid in self.manual:
+                self._to_auto_state(sid)
         if write_baseline:
             for ctx in self.zones.values():
                 await self._async_write_normal_baseline(ctx)
@@ -888,6 +916,15 @@ class ZoneHeatingCoordinator:
         """Master mode off: write the off-baseline, set the zones off (spec §2)."""
         termination = self._overlay_termination()
         for ctx in self.zones.values():
+            sid = ctx.subentry_id
+            # The master switch is the top-level control: Off puts the zone in off
+            # (spec §2/§4), so the zone climate shows ``off`` and any manual stand /
+            # respect-window is dropped. It returns to auto when the master does.
+            self._cancel_timer(sid)
+            ms = self.manual[sid]
+            ms.hvac_mode = HVAC_OFF
+            ms.preset = None
+            ms.custom_setpoint = None
             if write_baseline:
                 await self._async_write_off_baseline(ctx)
             ok = True

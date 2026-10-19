@@ -197,6 +197,44 @@ async def test_off_pauses_state_machine(hass: HomeAssistant) -> None:
     assert len(mode_calls) == before
 
 
+# --- master switch drives the per-zone hvac_mode (spec §2/§4) ----------------
+async def test_master_off_sets_zone_off_and_auto_restores(
+    hass: HomeAssistant,
+) -> None:
+    """Master Off puts the zone climate in ``off``; Auto returns it to ``auto``."""
+    await _setup(hass)
+    assert hass.states.get(CLIMATE).state == "auto"
+
+    await _select(hass, "off")
+    assert hass.states.get(CLIMATE).state == "off"
+
+    await _select(hass, "auto")
+    assert hass.states.get(CLIMATE).state == "auto"
+
+
+async def test_master_off_then_auto_drops_a_manual_stand(
+    hass: HomeAssistant,
+) -> None:
+    """A per-zone manual stand is dropped when the master goes Off -> Auto."""
+    await _setup(hass)
+    # Take a manual stand (boost -> hvac_mode heat).
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode",
+        {ATTR_ENTITY_ID: CLIMATE, "preset_mode": "boost"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(CLIMATE).state == "heat"
+
+    await _select(hass, "off")
+    assert hass.states.get(CLIMATE).state == "off"
+
+    await _select(hass, "auto")
+    # Back to auto, not the prior manual heat stand (master is the top control).
+    assert hass.states.get(CLIMATE).state == "auto"
+
+
 # --- leaving Off -> auto rewrites the normal baseline (spec §8) --------------
 async def test_leaving_off_to_auto_rewrites_normal_baseline(
     hass: HomeAssistant,
