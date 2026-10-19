@@ -2,7 +2,6 @@
   "config": {
     "step": {
       "user": {
-        "title": "Zone Heating",
         "description": "Set up the Zone Heating hub. Click Submit to create the integration. Add heating zones afterwards from the hub's configuration."
       }
     },
@@ -73,7 +72,7 @@
             "window_sensor": "Binary sensor that reports an open window or door for this zone.",
             "window_open_delay": "Minutes an open window must persist before heating is cut. 0 reacts immediately (safety).",
             "window_close_delay": "Minutes to wait after the window closes before the zone resumes its mode.",
-            "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive switch.<target>_schedule from the first target. You create the schedule helpers yourself.",
+            "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive it from the matching schedule switch of the first target. You create the schedule helpers yourself.",
             "standby_schedule": "Optional schedule helper that varies the standby temperature per time block; create it yourself under Settings → Devices & Services → Helpers.",
             "active_schedule": "Optional schedule helper that varies the active temperature per block and gates when Active is allowed.",
             "off_baseline_temp": "Frost-protection setpoint written to the thermostat while the master mode is Off."
@@ -107,7 +106,7 @@
             "window_sensor": "Binary sensor that reports an open window or door for this zone.",
             "window_open_delay": "Minutes an open window must persist before heating is cut. 0 reacts immediately (safety).",
             "window_close_delay": "Minutes to wait after the window closes before the zone resumes its mode.",
-            "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive switch.<target>_schedule from the first target. You create the schedule helpers yourself.",
+            "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive it from the matching schedule switch of the first target. You create the schedule helpers yourself.",
             "standby_schedule": "Optional schedule helper that varies the standby temperature per time block; create it yourself under Settings → Devices & Services → Helpers.",
             "active_schedule": "Optional schedule helper that varies the active temperature per block and gates when Active is allowed.",
             "off_baseline_temp": "Frost-protection setpoint written to the thermostat while the master mode is Off."

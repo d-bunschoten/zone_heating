@@ -2,7 +2,6 @@
   "config": {
     "step": {
       "user": {
-        "title": "Zone Heating",
         "description": "Stel de Zone Heating-hub in. Klik op Verzenden om de integratie aan te maken. Voeg daarna verwarmingszones toe vanuit de configuratie van de hub."
       }
     },
@@ -73,7 +72,7 @@
             "window_sensor": "Binaire sensor die een open raam of deur voor deze zone meldt.",
             "window_open_delay": "Aantal minuten dat een open raam moet aanhouden voordat de verwarming wordt afgeschakeld. 0 reageert direct (veiligheid).",
             "window_close_delay": "Aantal minuten wachten nadat het raam dicht is voordat de zone zijn stand hervat.",
-            "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om switch.<doel>_schedule af te leiden uit het eerste doel. De schemahelpers maak je zelf aan.",
+            "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om hem af te leiden uit de bijbehorende schemaschakelaar van het eerste doel. De schemahelpers maak je zelf aan.",
             "standby_schedule": "Optionele schemahelper die de standby-temperatuur per tijdblok laat variëren; maak je zelf aan via Instellingen → Apparaten en diensten → Helpers.",
             "active_schedule": "Optionele schemahelper die de actief-temperatuur per blok laat variëren en bepaalt wanneer Actief is toegestaan.",
             "off_baseline_temp": "Vorstbeveiligings-setpoint dat naar de thermostaat wordt geschreven terwijl de master-stand Off is."
@@ -107,7 +106,7 @@
             "window_sensor": "Binaire sensor die een open raam of deur voor deze zone meldt.",
             "window_open_delay": "Aantal minuten dat een open raam moet aanhouden voordat de verwarming wordt afgeschakeld. 0 reageert direct (veiligheid).",
             "window_close_delay": "Aantal minuten wachten nadat het raam dicht is voordat de zone zijn stand hervat.",
-            "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om switch.<doel>_schedule af te leiden uit het eerste doel. De schemahelpers maak je zelf aan.",
+            "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om hem af te leiden uit de bijbehorende schemaschakelaar van het eerste doel. De schemahelpers maak je zelf aan.",
             "standby_schedule": "Optionele schemahelper die de standby-temperatuur per tijdblok laat variëren; maak je zelf aan via Instellingen → Apparaten en diensten → Helpers.",
             "active_schedule": "Optionele schemahelper die de actief-temperatuur per blok laat variëren en bepaalt wanneer Actief is toegestaan.",
             "off_baseline_temp": "Vorstbeveiligings-setpoint dat naar de thermostaat wordt geschreven terwijl de master-stand Off is."
