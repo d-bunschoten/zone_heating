@@ -9,14 +9,15 @@ nadrukkelijk **geen custom-kaart**.
 
 - **Globale sectie** (vaste entity-id's, één keer voor het hele huis):
   - `select.heating_mode` — master-stand (`auto` / `fallback` / `off`).
-  - `number.heating_boost_temp`, `number.heating_boost_duration`,
-    `number.heating_override_timeout` — de globale knoppen.
+  - `number.heating_boost_duration`, `number.heating_override_timeout` — de
+    globale knoppen (de boost-*temperatuur* is per zone, zie hieronder).
   - `binary_sensor.heating_home_present` en `binary_sensor.heating_in_fallback`
     — alleen-lezen status.
 - **Per zone** een `thermostat`-kaart op `climate.<zone>` naast een
   `entities`-kaart met:
   - de dagelijkse knoppen `number.<zone>_away_temp` / `_standby_temp` /
-    `_active_temp`, en de optionele `schedule.<zone>_*_schedule`-helpers;
+    `_active_temp` / `_boost_temp`, en de optionele
+    `schedule.<zone>_*_schedule`-helpers;
   - een alleen-lezen rij met `sensor.<zone>_control_source`,
     `binary_sensor.<zone>_present` en `binary_sensor.<zone>_window_open`.
 

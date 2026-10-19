@@ -81,7 +81,7 @@ class AutoInputs:
     preset: str | None = None
     # The manually dialed setpoint used for Custom (preset=None in heat).
     custom_setpoint: float | None = None
-    # Global boost temperature (``number.heating_boost_temp``), for PRESET_BOOST.
+    # Per-zone boost temperature (``number.<zone>_boost_temp``), for PRESET_BOOST.
     boost_temp: float | None = None
 
 

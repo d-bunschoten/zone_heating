@@ -47,8 +47,8 @@ HA-agnostic `engine/` package so it can be unit-tested in isolation.
 - **Window modifier**: an open window cuts heating (immediately by default for
   safety); closing waits out a close-delay so a briefly cracked window does not
   whipsaw the setpoint.
-- **Boost / override**: global boost temperature + duration, and a respect-window
-  timeout for manual overrides.
+- **Boost / override**: a per-zone boost temperature with a global boost
+  duration, and a respect-window timeout for manual overrides.
 
 ## Installation
 

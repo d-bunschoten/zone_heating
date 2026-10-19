@@ -67,6 +67,7 @@ from .const import (
     CONTROL_SOURCE_HA_OVERLAY,
     CONTROL_SOURCE_TADO_SCHEDULE,
     DEFAULT_BOOST_DURATION,
+    DEFAULT_BOOST_TEMP,
     DEFAULT_DEAD_MANS_SWITCH,
     DEFAULT_OFF_BASELINE_TEMP,
     DEFAULT_OVERLAY_TERMINATION,
@@ -185,6 +186,7 @@ class ZoneContext:
     away_number: str | None = None
     standby_number: str | None = None
     active_number: str | None = None
+    boost_number: str | None = None
     # Referenced schedule helper entity_ids (``None`` => no schedule, spec §1.1).
     standby_schedule: str | None = None
     active_schedule: str | None = None
@@ -284,7 +286,6 @@ class ZoneHeatingCoordinator:
         # Dead-man's-switch heartbeat canceller (spec §7); only armed in auto.
         self._heartbeat_cancel: Callable[[], None] | None = None
         self._home_present_entity: str | None = None
-        self._boost_temp_entity: str | None = None
         self._boost_duration_entity: str | None = None
         self._override_timeout_entity: str | None = None
         # target entity_id -> list of zone subentry_ids that use it.
@@ -311,9 +312,6 @@ class ZoneHeatingCoordinator:
         )
         self._home_present_entity = registry.async_get_entity_id(
             Platform.BINARY_SENSOR, DOMAIN, KEY_HOME_PRESENT
-        )
-        self._boost_temp_entity = registry.async_get_entity_id(
-            Platform.NUMBER, DOMAIN, KEY_BOOST_TEMP
         )
         self._boost_duration_entity = registry.async_get_entity_id(
             Platform.NUMBER, DOMAIN, KEY_BOOST_DURATION
@@ -350,6 +348,9 @@ class ZoneHeatingCoordinator:
                 active_number=registry.async_get_entity_id(
                     Platform.NUMBER, DOMAIN, f"{sid}_{KEY_ACTIVE_TEMP}"
                 ),
+                boost_number=registry.async_get_entity_id(
+                    Platform.NUMBER, DOMAIN, f"{sid}_{KEY_BOOST_TEMP}"
+                ),
                 standby_schedule=subentry.data.get(CONF_STANDBY_SCHEDULE),
                 active_schedule=subentry.data.get(CONF_ACTIVE_SCHEDULE),
                 off_baseline_temp=float(
@@ -373,6 +374,7 @@ class ZoneHeatingCoordinator:
                 ctx.away_number,
                 ctx.standby_number,
                 ctx.active_number,
+                ctx.boost_number,
                 ctx.standby_schedule,
                 ctx.active_schedule,
                 ctx.window_binary,
@@ -1455,6 +1457,9 @@ class ZoneHeatingCoordinator:
         active = self._read_number(ctx.active_number)
         if away is None or standby is None or active is None:
             return None
+        boost = self._read_number(ctx.boost_number)
+        if boost is None:
+            boost = DEFAULT_BOOST_TEMP
         return AutoInputs(
             # Real window state (spec §3). The coordinator already short-circuits an
             # open window above (safety, across all hvac modes), so this is False
@@ -1469,7 +1474,7 @@ class ZoneHeatingCoordinator:
             standby_schedule=self._read_schedule(ctx.standby_schedule),
             preset=ms.preset,
             custom_setpoint=ms.custom_setpoint,
-            boost_temp=self._read_number(self._boost_temp_entity),
+            boost_temp=boost,
         )
 
     def _read_number(self, entity_id: str | None) -> float | None:

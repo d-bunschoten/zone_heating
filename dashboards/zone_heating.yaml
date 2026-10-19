@@ -78,8 +78,8 @@ views:
             name: Master-stand (auto / fallback / off)
           - type: section
             label: Boost & override
-          - entity: number.heating_boost_temp
-            name: Boost-temperatuur
+          # De boost-temperatuur is per zone instelbaar (zie elke zone-kaart);
+          # alleen de boost-duur en override-timeout zijn globaal.
           - entity: number.heating_boost_duration
             name: Boost-duur
           - entity: number.heating_override_timeout
@@ -127,6 +127,8 @@ views:
                 name: Standby-temp
               - entity: number.woonkamer_active_temp
                 name: Active-temp
+              - entity: number.woonkamer_boost_temp
+                name: Boost-temp
               # Schedule-helpers zijn OPTIONEEL: ze bestaan alleen als je ze zelf
               # als `schedule`-helper hebt aangemaakt én aan de zone hebt
               # gekoppeld. Heeft deze zone ze niet, verwijder dan deze sectie.
@@ -181,6 +183,8 @@ views:
                 name: Standby-temp
               - entity: number.keuken_active_temp
                 name: Active-temp
+              - entity: number.keuken_boost_temp
+                name: Boost-temp
               - type: section
                 label: Status (alleen-lezen)
               - entity: sensor.keuken_control_source

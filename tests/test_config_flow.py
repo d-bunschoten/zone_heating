@@ -99,6 +99,7 @@ async def test_zone_subentry_flow_creates_device_and_entities(
         "number.woonkamer_away_temp",
         "number.woonkamer_standby_temp",
         "number.woonkamer_active_temp",
+        "number.woonkamer_boost_temp",
         "sensor.woonkamer_control_source",
     ]
     for entity_id in expected:
@@ -113,6 +114,8 @@ async def test_zone_subentry_flow_creates_device_and_entities(
     assert float(hass.states.get("number.woonkamer_away_temp").state) == 16.0
     assert float(hass.states.get("number.woonkamer_standby_temp").state) == 18.0
     assert float(hass.states.get("number.woonkamer_active_temp").state) == 20.0
+    # Boost temp is per-zone (default 23) and replaces the former global number.
+    assert float(hass.states.get("number.woonkamer_boost_temp").state) == 23.0
 
     # The per-zone entities are all attached to exactly one zone device,
     # and that device is linked to the zone subentry.

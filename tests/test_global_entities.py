@@ -49,8 +49,9 @@ async def test_global_entities_exist_with_defaults(hass: HomeAssistant) -> None:
     assert mode.state == "auto"
     assert mode.attributes["options"] == ["auto", "fallback", "off"]
 
-    # number defaults.
-    assert float(hass.states.get("number.heating_boost_temp").state) == 23.0
+    # number defaults. Boost *temp* is per-zone now (see test_config_flow); only
+    # the boost *duration* and override timeout remain global.
+    assert hass.states.get("number.heating_boost_temp") is None
     assert float(hass.states.get("number.heating_boost_duration").state) == 60.0
     assert (
         float(hass.states.get("number.heating_override_timeout").state) == 120.0

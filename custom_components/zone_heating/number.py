@@ -1,9 +1,9 @@
 """Number entities for Zone Heating (global + per-zone setpoints).
 
-Per-zone setpoints (``away``/``standby``/``active``) are required RestoreNumber
-entities so user changes persist across restarts (spec §1.1). Global numbers
-(boost temp/duration, override timeout) are the dashboard knobs from spec §1.2.
-No control logic here (F1): values are stored defaults only.
+Per-zone setpoints (``away``/``standby``/``active``/``boost``) are required
+RestoreNumber entities so user changes persist across restarts (spec §1.1).
+Global numbers (boost duration, override timeout) are the dashboard knobs from
+spec §1.2. No control logic here (F1): values are stored defaults only.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class _DurationNumber(_BaseNumber):
 
 
 class ZoneTempNumber(_TempNumber):
-    """A per-zone setpoint (away/standby/active)."""
+    """A per-zone setpoint (away/standby/active/boost)."""
 
     def __init__(
         self,
@@ -98,21 +98,6 @@ class ZoneTempNumber(_TempNumber):
         super().__init__(f"{subentry.subentry_id}_{key}", default)
         self._attr_name = name
         self._attr_device_info = zone_device_info(subentry)
-
-
-class GlobalTempNumber(_TempNumber):
-    """A global temperature number (boost temp)."""
-
-    _attr_has_entity_name = False
-
-    def __init__(
-        self, device: DeviceInfo, key: str, name: str, default: float
-    ) -> None:
-        super().__init__(key, default)
-        self._attr_name = name
-        self._attr_device_info = device
-        # Force the spec entity_id (number.<key>), independent of the device.
-        self.entity_id = f"number.{key}"
 
 
 class GlobalDurationNumber(_DurationNumber):
@@ -138,9 +123,6 @@ async def async_setup_entry(
     hub = hub_device_info(entry)
     async_add_entities(
         [
-            GlobalTempNumber(
-                hub, KEY_BOOST_TEMP, "Heating boost temp", DEFAULT_BOOST_TEMP
-            ),
             GlobalDurationNumber(
                 hub,
                 KEY_BOOST_DURATION,
@@ -173,6 +155,12 @@ async def async_setup_entry(
                     KEY_ACTIVE_TEMP,
                     "Active temp",
                     DEFAULT_ACTIVE_TEMP,
+                ),
+                ZoneTempNumber(
+                    subentry,
+                    KEY_BOOST_TEMP,
+                    "Boost temp",
+                    DEFAULT_BOOST_TEMP,
                 ),
             ],
             config_subentry_id=subentry.subentry_id,

@@ -84,6 +84,9 @@ DEFAULT_OVERLAY_TIMER_DURATION = 60
 DEFAULT_AWAY_TEMP = 16.0
 DEFAULT_STANDBY_TEMP = 18.0
 DEFAULT_ACTIVE_TEMP = 20.0
+# Per-zone boost comfort setpoint (spec §1.1, §3). Warmer than Active so a boost
+# is a noticeable lift; the boost *duration* stays global.
+DEFAULT_BOOST_TEMP = 23.0
 # Frost-protection setpoint for the off-baseline (spec §8); matches Tado's own
 # frost protection (5 °C) and the integration's MIN_TEMP.
 DEFAULT_OFF_BASELINE_TEMP = 5.0
@@ -94,7 +97,6 @@ MAX_TEMP = 30.0
 TEMP_STEP = 0.5
 
 # Global entity defaults (spec §1.2).
-DEFAULT_BOOST_TEMP = 23.0
 DEFAULT_BOOST_DURATION = 60  # minutes
 DEFAULT_OVERRIDE_TIMEOUT = 120  # minutes
 
@@ -120,7 +122,6 @@ CONTROL_SOURCE_OPTIONS = [CONTROL_SOURCE_HA_OVERLAY, CONTROL_SOURCE_TADO_SCHEDUL
 # --- Global entity keys (used for unique_id + object_id) ---------------------
 # These map 1:1 to the spec §1.2 entity_ids (select.heating_mode, etc.).
 KEY_HEATING_MODE = "heating_mode"
-KEY_BOOST_TEMP = "heating_boost_temp"
 KEY_BOOST_DURATION = "heating_boost_duration"
 KEY_OVERRIDE_TIMEOUT = "heating_override_timeout"
 KEY_HOME_PRESENT = "heating_home_present"
@@ -131,6 +132,9 @@ KEY_CLIMATE = "climate"
 KEY_AWAY_TEMP = "away_temp"
 KEY_STANDBY_TEMP = "standby_temp"
 KEY_ACTIVE_TEMP = "active_temp"
+# Per-zone boost setpoint (spec §1.1, §3). Replaces the former global
+# ``number.heating_boost_temp`` so boost comfort is tunable per room.
+KEY_BOOST_TEMP = "boost_temp"
 KEY_CONTROL_SOURCE = "control_source"
 KEY_PRESENT = "present"
 KEY_WINDOW_OPEN = "window_open"
