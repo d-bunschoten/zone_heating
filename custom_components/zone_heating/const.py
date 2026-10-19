@@ -133,6 +133,10 @@ KEY_ACTIVE_TEMP = "active_temp"
 KEY_CONTROL_SOURCE = "control_source"
 KEY_PRESENT = "present"
 KEY_WINDOW_OPEN = "window_open"
+# Per-zone respect-window / boost end as a timestamp sensor (spec §1.1). A
+# timestamp lets the HA UI show a live "ends in …" countdown without the backend
+# having to tick; ``unknown`` while no respect-window/boost runs.
+KEY_OVERRIDE_ENDS = "override_ends"
 
 # --- Coordinator (F2) -------------------------------------------------------
 # Periodic re-evaluation so schedule-block boundaries are crossed even without a

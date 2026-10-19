@@ -44,7 +44,7 @@ from homeassistant.core import (
     split_entity_id,
 )
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_call_later,
@@ -390,6 +390,9 @@ class ZoneHeatingCoordinator:
                 targets.add(target)
                 self._target_to_zone.setdefault(target, []).append(sid)
 
+        # Group each zone's configured schedule helpers under its device (spec §1.1).
+        self._link_zone_schedule_helpers(registry)
+
         if tracked:
             self.entry.async_on_unload(
                 async_track_state_change_event(
@@ -449,6 +452,65 @@ class ZoneHeatingCoordinator:
             return None
         object_id = split_entity_id(targets[0])[1]
         return f"{SWITCH_DOMAIN}.{object_id}{SCHEDULE_SWITCH_SUFFIX}"
+
+    def _link_zone_schedule_helpers(self, registry: er.EntityRegistry) -> None:
+        """Group each zone's configured schedule helpers under the zone device.
+
+        The referenced HA ``schedule`` helpers are UI helpers with
+        ``device_id=None``, so without this they appear nowhere near the zone's
+        device. We attach **only** the schedule helpers (never the window sensor
+        or presence source) to the zone's device so they show up in its entity
+        list (spec §1.1), and we detach any schedule helper that is still on the
+        device but no longer configured, so it disappears again when unlinked.
+
+        Idempotent (only writes when ``device_id`` differs), robust (a missing
+        device/entity is skipped) and fully defensive: it must never let setup
+        fail, so any unexpected error is logged and swallowed.
+        """
+        try:
+            device_reg = dr.async_get(self.hass)
+            for sid, ctx in self.zones.items():
+                # ``async_get_device(identifiers=...)`` is deprecated (identifiers
+                # are no longer globally unique); the per-identifier lookup is the
+                # supported replacement. Our zone identifier ``(DOMAIN, sid)`` comes
+                # from ``helpers.zone_device_info`` and is unique within this entry.
+                device = device_reg.async_get_device_by_identifier(
+                    (DOMAIN, sid), self.entry.entry_id
+                )
+                if device is None:
+                    continue
+                configured = {
+                    entity_id
+                    for entity_id in (ctx.standby_schedule, ctx.active_schedule)
+                    if entity_id
+                }
+                # Attach every configured schedule helper that exists in the
+                # registry (idempotent: only when the device_id actually differs).
+                for entity_id in configured:
+                    entry = registry.async_get(entity_id)
+                    if entry is None:
+                        continue  # not (yet) a registered entity -> skip
+                    if entry.device_id != device.id:
+                        registry.async_update_entity(
+                            entity_id, device_id=device.id
+                        )
+                # Detach schedule helpers still linked to this device but dropped
+                # from the config, so unlinking a helper removes it from the device.
+                for entry in er.async_entries_for_device(
+                    registry, device.id, include_disabled_entities=True
+                ):
+                    if (
+                        entry.platform == SCHEDULE_DOMAIN
+                        and entry.entity_id not in configured
+                    ):
+                        registry.async_update_entity(
+                            entry.entity_id, device_id=None
+                        )
+        except Exception as err:  # noqa: BLE001 - must never break setup
+            LOGGER.warning(
+                "Kon schedule-helpers niet aan het zone-device koppelen: %s",
+                err,
+            )
 
     def _initial_manual_state(self, sid: str) -> ZoneManualState:
         """Build a zone's initial manual state, honouring a restore (spec §9)."""
@@ -673,6 +735,16 @@ class ZoneHeatingCoordinator:
             return 0
         return int((remaining + 59) // 60)
 
+    def zone_override_end(self, sid: str) -> datetime | None:
+        """End of the respect-window / boost as a timestamp (spec §1.1).
+
+        ``None`` when no timer is running — i.e. in ``auto``, a sticky ``away``
+        preset or a sticky ``off`` zone; the timestamp sensor then shows
+        ``unknown`` (no countdown).
+        """
+        ms = self.manual.get(sid)
+        return ms.timer_end if ms else None
+
     # --- timers -------------------------------------------------------------
     def _start_stand_timer(self, sid: str) -> None:
         """(Re)start the timer for the current manual stand (spec §3).
@@ -706,6 +778,9 @@ class ZoneHeatingCoordinator:
         ms.timer_cancel = async_call_later(
             self.hass, delay, partial(self._on_timer_expire, sid)
         )
+        # The respect-window / boost end changed -> refresh the timestamp sensor
+        # (spec §1.1 ``sensor.<zone>_override_ends``). No other behaviour changes.
+        self._notify(sid)
 
     @callback
     def _on_timer_expire(self, sid: str, _now) -> None:
@@ -724,10 +799,16 @@ class ZoneHeatingCoordinator:
         ms = self.manual.get(sid)
         if ms is None:
             return
+        had_timer = ms.timer_end is not None
         if ms.timer_cancel is not None:
             ms.timer_cancel()
         ms.timer_cancel = None
         ms.timer_end = None
+        # Clearing a running timer changes the override-end -> refresh the
+        # timestamp sensor (spec §1.1). Skip the notify when there was nothing to
+        # clear so a routine cancel does not churn state.
+        if had_timer:
+            self._notify(sid)
 
     def _to_auto_state(self, sid: str) -> None:
         """Drop any manual stand and return the zone to auto (spec §3)."""
@@ -807,9 +888,21 @@ class ZoneHeatingCoordinator:
         for ctx in self.zones.values():
             if write_baseline:
                 await self._async_write_off_baseline(ctx)
+            ok = True
             if ctx.targets:
-                await self.backend.set_off(ctx.targets, termination)
-            self._applied[ctx.subentry_id] = _Applied(off=True, setpoint=None)
+                # Resilient like the auto path (F5.2 §A): a failed set_off at
+                # master=off is logged + skipped, never propagated, so Off still
+                # loads. On failure leave the applied-cache untouched so a later
+                # attempt retries; the surfaced stand still reflects Off (spec §8).
+                ok = await self._safe_backend_write(
+                    self.backend.set_off(ctx.targets, termination),
+                    ctx=ctx,
+                    action="set_off",
+                )
+            if ok:
+                self._applied[ctx.subentry_id] = _Applied(
+                    off=True, setpoint=None
+                )
             self._set_runtime_stand(ctx, STAND_OFF)
 
     async def _async_evaluate_zone(self, ctx: ZoneContext) -> None:
@@ -1029,12 +1122,22 @@ class ZoneHeatingCoordinator:
             if applied is None or applied.off or applied.setpoint is None:
                 continue
             if ctx.targets:
-                await self.backend.set_setpoint(
-                    ctx.targets, applied.setpoint, termination
+                # A failed heartbeat (e.g. tado_hijack down) is logged + skipped,
+                # not raised as a loose exception (spec §7/§8 resilience). The
+                # dead-man's-switch still protects: a crashed HA lets the overlay
+                # lapse to the Tado baseline regardless.
+                ok = await self._safe_backend_write(
+                    self.backend.set_setpoint(
+                        ctx.targets, applied.setpoint, termination
+                    ),
+                    ctx=ctx,
+                    action="heartbeat",
                 )
-                # The heartbeat is HA's own command: refresh the own-command
-                # debounce so the device's echo is never read as Custom (spec §5).
-                self.manual[ctx.subentry_id].last_command_at = now
+                # Only refresh the own-command debounce when the write landed, so
+                # the device's echo is never read as Custom (spec §5); on failure
+                # nothing was written, so leave it.
+                if ok:
+                    self.manual[ctx.subentry_id].last_command_at = now
 
     # --- global config reads (spec §7) --------------------------------------
     def _dead_mans_switch(self) -> bool:

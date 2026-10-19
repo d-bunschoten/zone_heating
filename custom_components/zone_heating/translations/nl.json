@@ -139,6 +139,9 @@
           "ha_overlay": "HA overlay",
           "tado_schedule": "Tado schedule"
         }
+      },
+      "override_ends": {
+        "name": "Override eindigt"
       }
     }
   }

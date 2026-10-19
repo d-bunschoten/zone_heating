@@ -10,8 +10,10 @@ failed baseline write does not persist its signature, so a later attempt retries
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
+from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
@@ -35,6 +37,7 @@ from custom_components.zone_heating.const import (
 
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_fire_time_changed,
     async_mock_service,
 )
 
@@ -172,3 +175,71 @@ async def test_retry_writes_baseline_after_backend_recovers(
     assert len(sched_calls) >= 1
     assert sched_calls[-1].data["blocks"][0]["temperature"] == 18.0
     assert _zone_sid(entry) in entry.runtime_data.coordinator._baseline_sigs
+
+
+# --- F5.3: Off-baseline + heartbeat resilience (spec §8, §9) -----------------
+async def test_off_mode_survives_failing_backend(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Master=off with a failing backend is logged + skipped; entry stays loaded.
+
+    Both the off-baseline ``set_schedule`` and the ``set_off`` overlay fail, but
+    the zone still reports Off and the entry stays loaded (F5.3 §C).
+    """
+
+    async def _raise(call: ServiceCall) -> None:
+        raise HomeAssistantError("tado backend down")
+
+    hass.services.async_register(TADO_DOMAIN, TADO_SERVICE_SET_MODE, _raise)
+    hass.services.async_register(TADO_DOMAIN, TADO_SERVICE_SET_SCHEDULE, _raise)
+
+    entry = await _make_entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    with caplog.at_level(logging.WARNING, logger="custom_components.zone_heating"):
+        await hass.services.async_call(
+            "select",
+            "select_option",
+            {ATTR_ENTITY_ID: "select.heating_mode", "option": "off"},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    # The off-write failed but was swallowed: the entry is still loaded and the
+    # zone reflects Off (the runtime stand is set despite the failed write).
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("climate.woonkamer").attributes["zone_state"] == "Off"
+    assert "set_off" in caplog.text
+    assert "mislukt" in caplog.text
+
+
+async def test_failing_heartbeat_is_logged_not_raised(
+    hass: HomeAssistant, caplog, freezer
+) -> None:
+    """A failing dead-man's-switch heartbeat is logged + skipped, not raised."""
+    # Working backend at setup so an Active overlay is applied (DMS default on).
+    async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_MODE)
+    async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_SCHEDULE)
+    entry = await _make_entry(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    # From now on the overlay re-assert fails.
+    async def _raise(call: ServiceCall) -> None:
+        raise HomeAssistantError("tado backend down")
+
+    hass.services.async_register(TADO_DOMAIN, TADO_SERVICE_SET_MODE, _raise)
+
+    with caplog.at_level(logging.WARNING, logger="custom_components.zone_heating"):
+        freezer.tick(timedelta(minutes=11))  # past the 10-min heartbeat interval
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+
+    # The heartbeat failure was logged as a warning, not propagated as an
+    # exception; the entry stays loaded (F5.3 §C).
+    assert entry.state is ConfigEntryState.LOADED
+    assert "heartbeat" in caplog.text
+    assert "mislukt" in caplog.text
