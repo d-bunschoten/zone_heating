@@ -108,9 +108,15 @@ HEATING_MODES = [MODE_AUTO, MODE_FALLBACK, MODE_OFF]
 DEFAULT_HEATING_MODE = MODE_AUTO
 
 # --- Climate presets (spec §1.1, §4) ----------------------------------------
+# These are the strings exposed on ``climate.<zone>.preset_mode``. They map onto
+# Home Assistant's **standard** climate presets so the thermostat/mushroom cards
+# render nice built-in icons: Standby -> ``eco`` (zuinig/idle), Active ->
+# ``comfort`` (kamer in gebruik). The constant *names* keep the internal
+# semantics; only their values are HA-standard. The semantic stand label lives
+# separately in the ``zone_state`` attribute (``Standby``/``Active``/...).
 PRESET_AWAY = "away"
-PRESET_STANDBY = "standby"
-PRESET_ACTIVE = "active"
+PRESET_STANDBY = "eco"
+PRESET_ACTIVE = "comfort"
 PRESET_BOOST = "boost"
 ZONE_PRESET_MODES = [PRESET_AWAY, PRESET_STANDBY, PRESET_ACTIVE, PRESET_BOOST]
 

@@ -216,7 +216,7 @@ async def test_window_open_turns_off_and_restores_mode(
     await hass.async_block_till_done()
 
     # Take a manual stand so we can prove the *prior mode* is restored.
-    await _set_preset(hass, "active")
+    await _set_preset(hass, "comfort")  # HA-standard preset -> Active stand
     assert hass.states.get(CLIMATE).state == "heat"
     assert hass.states.get(CLIMATE).attributes["zone_state"] == "Active"
 
@@ -317,7 +317,7 @@ async def test_restart_without_timer_degrades_to_auto(
                 State(CLIMATE, "heat"),
                 {
                     "hvac_mode": "heat",
-                    "preset": "active",
+                    "preset": "comfort",
                     "custom_setpoint": None,
                     "override_remaining_min": None,
                 },

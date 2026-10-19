@@ -150,6 +150,32 @@ async def test_set_temperature_enters_custom(hass: HomeAssistant) -> None:
     assert state.attributes["override_active"] is True
 
 
+# --- preset_mode uses HA-standard presets (F5.6, nice icons) ----------------
+async def test_preset_modes_are_ha_standard(hass: HomeAssistant) -> None:
+    """``climate.<zone>`` exposes HA-standard presets: away/eco/comfort/boost."""
+    await _setup(hass, home="on", zone="off")
+    state = hass.states.get(CLIMATE)
+    assert state.attributes["preset_modes"] == ["away", "eco", "comfort", "boost"]
+
+
+async def test_auto_standby_preset_is_eco(hass: HomeAssistant) -> None:
+    """In auto, the Standby stand reports preset ``eco`` (zone_state stays Standby)."""
+    await _setup(hass, home="on", zone="off")  # present but Active not allowed
+    state = hass.states.get(CLIMATE)
+    assert state.state == "auto"
+    assert state.attributes["zone_state"] == "Standby"
+    assert state.attributes["preset_mode"] == "eco"
+
+
+async def test_auto_active_preset_is_comfort(hass: HomeAssistant) -> None:
+    """In auto, the Active stand reports preset ``comfort`` (zone_state stays Active)."""
+    await _setup(hass, home="on", zone="on")  # present + Active allowed
+    state = hass.states.get(CLIMATE)
+    assert state.state == "auto"
+    assert state.attributes["zone_state"] == "Active"
+    assert state.attributes["preset_mode"] == "comfort"
+
+
 # --- set_preset_mode -> forced stand ----------------------------------------
 async def test_preset_boost(hass: HomeAssistant) -> None:
     _, calls = await _setup(hass, home="on", zone="off")
@@ -165,22 +191,24 @@ async def test_preset_boost(hass: HomeAssistant) -> None:
 
 async def test_preset_active(hass: HomeAssistant) -> None:
     _, calls = await _setup(hass, home="on", zone="off")  # Standby base
-    await _set_preset(hass, "active")
+    # HA-standard preset ``comfort`` maps onto the Active stand (nice icons).
+    await _set_preset(hass, "comfort")
 
     assert calls[-1].data[ATTR_TEMPERATURE] == ACTIVE_TEMP
     state = hass.states.get(CLIMATE)
     assert state.attributes["zone_state"] == "Active"
-    assert state.attributes["preset_mode"] == "active"
+    assert state.attributes["preset_mode"] == "comfort"
 
 
 async def test_preset_standby(hass: HomeAssistant) -> None:
     _, calls = await _setup(hass, home="on", zone="on")  # Active base
-    await _set_preset(hass, "standby")
+    # HA-standard preset ``eco`` maps onto the Standby stand (nice icons).
+    await _set_preset(hass, "eco")
 
     assert calls[-1].data[ATTR_TEMPERATURE] == STANDBY_TEMP
     state = hass.states.get(CLIMATE)
     assert state.attributes["zone_state"] == "Standby"
-    assert state.attributes["preset_mode"] == "standby"
+    assert state.attributes["preset_mode"] == "eco"
 
 
 async def test_preset_away(hass: HomeAssistant) -> None:
@@ -213,7 +241,7 @@ async def test_override_timeout_expires_to_auto(
     hass: HomeAssistant, freezer
 ) -> None:
     _, calls = await _setup(hass, home="on", zone="off")  # Standby
-    await _set_preset(hass, "active")
+    await _set_preset(hass, "comfort")
     assert hass.states.get(CLIMATE).state == "heat"
 
     _advance(hass, freezer, 121)  # override timeout default 120 min
@@ -246,7 +274,7 @@ async def test_non_sticky_stand_ends_on_house_away(
     hass: HomeAssistant,
 ) -> None:
     _, calls = await _setup(hass, home="on", zone="on")
-    await _set_preset(hass, "active")
+    await _set_preset(hass, "comfort")
     assert hass.states.get(CLIMATE).state == "heat"
 
     hass.states.async_set(HOME_SOURCE, "off")

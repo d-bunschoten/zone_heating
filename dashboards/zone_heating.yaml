@@ -110,8 +110,8 @@ views:
                 style: dropdown
                 preset_modes:
                   - away
-                  - standby
-                  - active
+                  - eco
+                  - comfort
                   - boost
           # --- Config-sectie: de "dagelijkse knoppen" + alleen-lezen status ---
           - type: entities
@@ -167,8 +167,8 @@ views:
                 style: dropdown
                 preset_modes:
                   - away
-                  - standby
-                  - active
+                  - eco
+                  - comfort
                   - boost
           - type: entities
             title: Keuken — instellingen

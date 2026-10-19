@@ -38,9 +38,12 @@ STAND_FALLBACK = "Fallback"
 # Lowercase; identical to the climate entity's preset strings (``const.py``
 # ``PRESET_*``). Duplicated here deliberately: the engine cannot import the HA
 # ``const`` module (which imports Home Assistant) and must stay pure.
+# These are HA's **standard** climate presets (nice built-in icons): Standby maps
+# onto ``eco`` and Active onto ``comfort``. The constant names keep the internal
+# semantics; the semantic stand label lives in ``stand`` (``Standby``/``Active``).
 PRESET_AWAY = "away"
-PRESET_STANDBY = "standby"
-PRESET_ACTIVE = "active"
+PRESET_STANDBY = "eco"
+PRESET_ACTIVE = "comfort"
 PRESET_BOOST = "boost"
 
 
