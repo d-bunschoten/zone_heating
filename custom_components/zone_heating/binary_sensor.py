@@ -19,7 +19,9 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigSubentry
+from homeassistant.const import Platform
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -50,6 +52,7 @@ from .const import (
     DEFAULT_ON_DELAY,
     DEFAULT_WINDOW_CLOSE_DELAY,
     DEFAULT_WINDOW_OPEN_DELAY,
+    DOMAIN,
     KEY_HOME_PRESENT,
     KEY_IN_FALLBACK,
     KEY_PRESENT,
@@ -300,17 +303,55 @@ async def async_setup_entry(
     entry: ZoneHeatingConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the global and per-zone binary sensor entities."""
+    """Set up the global and per-zone binary sensor entities.
+
+    Per-zone sensors are **conditional** (spec §1.1): a zone only gets a
+    ``<zone>_present`` sensor when it has a presence source (entity or template) and
+    a ``<zone>_window_open`` sensor when a window sensor is configured. A source that
+    was removed on reconfigure gets its now-orphaned registry entry cleaned up so it
+    does not linger as an ``unavailable`` entity.
+    """
     hub = hub_device_info(entry)
     async_add_entities(
         [HomePresentBinarySensor(entry, hub), InFallbackBinarySensor(entry, hub)]
     )
 
+    registry = er.async_get(hass)
     for subentry in iter_zone_subentries(entry):
-        async_add_entities(
-            [
-                ZonePresentBinarySensor(subentry),
-                ZoneWindowOpenBinarySensor(subentry),
-            ],
-            config_subentry_id=subentry.subentry_id,
+        has_presence = bool(
+            subentry.data.get(CONF_PRESENCE_ENTITY)
+            or subentry.data.get(CONF_PRESENCE_TEMPLATE)
         )
+        has_window = bool(subentry.data.get(CONF_WINDOW_SENSOR))
+
+        new_entities: list[BinarySensorEntity] = []
+        if has_presence:
+            new_entities.append(ZonePresentBinarySensor(subentry))
+        else:
+            _remove_orphan(registry, subentry.subentry_id, KEY_PRESENT)
+        if has_window:
+            new_entities.append(ZoneWindowOpenBinarySensor(subentry))
+        else:
+            _remove_orphan(registry, subentry.subentry_id, KEY_WINDOW_OPEN)
+
+        if new_entities:
+            async_add_entities(
+                new_entities, config_subentry_id=subentry.subentry_id
+            )
+
+
+def _remove_orphan(
+    registry: er.EntityRegistry, subentry_id: str, key: str
+) -> None:
+    """Drop a per-zone binary_sensor registry entry whose source is gone (spec §1.1).
+
+    Called when a zone has no presence/window source: if a sensor was created for it
+    on an earlier config (before the source was removed on reconfigure), remove its
+    registry entry so it does not stay behind as an orphaned ``unavailable`` entity.
+    Robust: does nothing when the entity was never registered.
+    """
+    entity_id = registry.async_get_entity_id(
+        Platform.BINARY_SENSOR, DOMAIN, f"{subentry_id}_{key}"
+    )
+    if entity_id is not None:
+        registry.async_remove(entity_id)

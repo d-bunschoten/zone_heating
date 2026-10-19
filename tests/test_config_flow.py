@@ -93,18 +93,21 @@ async def test_zone_subentry_flow_creates_device_and_entities(
     # entry so the new zone's device and entities are created automatically.
     await hass.async_block_till_done()
 
-    # All per-zone entities exist with the expected entity_ids.
+    # The always-present per-zone entities exist with the expected entity_ids.
     expected = [
         "climate.woonkamer",
         "number.woonkamer_away_temp",
         "number.woonkamer_standby_temp",
         "number.woonkamer_active_temp",
         "sensor.woonkamer_control_source",
-        "binary_sensor.woonkamer_present",
-        "binary_sensor.woonkamer_window_open",
     ]
     for entity_id in expected:
         assert hass.states.get(entity_id) is not None, f"missing {entity_id}"
+
+    # The conditional per-zone binary sensors are NOT created: this zone was
+    # configured without a presence source or a window sensor (spec §1.1).
+    assert hass.states.get("binary_sensor.woonkamer_present") is None
+    assert hass.states.get("binary_sensor.woonkamer_window_open") is None
 
     # The per-zone number defaults (away < standby < active).
     assert float(hass.states.get("number.woonkamer_away_temp").state) == 16.0

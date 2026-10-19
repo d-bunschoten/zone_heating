@@ -43,6 +43,7 @@ from homeassistant.core import (
     callback,
     split_entity_id,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
@@ -891,14 +892,63 @@ class ZoneHeatingCoordinator:
             return
         termination = self._overlay_termination()
         if decision.off:
-            await self.backend.set_off(ctx.targets, termination)
-        else:
-            await self.backend.set_setpoint(
-                ctx.targets, decision.setpoint, termination
+            ok = await self._safe_backend_write(
+                self.backend.set_off(ctx.targets, termination),
+                ctx=ctx,
+                action="set_off",
             )
+        else:
+            ok = await self._safe_backend_write(
+                self.backend.set_setpoint(
+                    ctx.targets, decision.setpoint, termination
+                ),
+                ctx=ctx,
+                action="set_setpoint",
+            )
+        if not ok:
+            # The write failed (e.g. tado_hijack down): leave _applied,
+            # last_commanded_setpoint and last_command_at untouched so the next
+            # evaluation retries it. The existing overlay/schedule is the vangnet.
+            return
+        if not decision.off:
             ms.last_commanded_setpoint = decision.setpoint
         ms.last_command_at = dt_util.utcnow()
         self._applied[ctx.subentry_id] = want
+
+    async def _safe_backend_write(
+        self, coro, *, ctx: ZoneContext, action: str
+    ) -> bool:
+        """Await a backend write, swallowing a failing Tado call (spec §8, §9).
+
+        A failed Tado-write (backend service missing/erroring, e.g.
+        ``ServiceNotFound: tado_hijack.set_mode``) is **logged as a warning and
+        skipped** instead of propagating — so the integration keeps loading and the
+        existing Tado schedule/overlay stays the vangnet. Returns ``True`` on
+        success, ``False`` when the write failed (caller then skips its bookkeeping
+        so a later evaluation retries).
+        """
+        try:
+            await coro
+        except HomeAssistantError as err:
+            LOGGER.warning(
+                "Zone %s: Tado-write (%s) mislukt: %s; overgeslagen, "
+                "bestaand schema/overlay blijft het vangnet",
+                ctx.name,
+                action,
+                err,
+            )
+            return False
+        except Exception as err:  # noqa: BLE001 - defensive: a flaky backend must
+            # never crash setup/evaluation; log and skip the write.
+            LOGGER.warning(
+                "Zone %s: onverwachte fout bij Tado-write (%s): %s; overgeslagen, "
+                "bestaand schema/overlay blijft het vangnet",
+                ctx.name,
+                action,
+                err,
+            )
+            return False
+        return True
 
     def _update_runtime(
         self,
@@ -1077,13 +1127,21 @@ class ZoneHeatingCoordinator:
             )
             return
         for write in plan.writes:
-            await self.backend.set_schedule(
-                ctx.targets,
-                plan.timetable,
-                list(write.blocks),
-                all_days=write.all_days,
-                days=None if write.all_days else list(write.weekdays),
+            ok = await self._safe_backend_write(
+                self.backend.set_schedule(
+                    ctx.targets,
+                    plan.timetable,
+                    list(write.blocks),
+                    all_days=write.all_days,
+                    days=None if write.all_days else list(write.weekdays),
+                ),
+                ctx=ctx,
+                action="set_schedule",
             )
+            if not ok:
+                # Do not store the signature on a failed write, so a next attempt
+                # retries the baseline instead of deduping it away (spec §8).
+                return
         self._baseline_sigs[sid] = signature
         if self._store is not None:
             await self._store.async_save(self._baseline_sigs)
