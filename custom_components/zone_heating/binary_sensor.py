@@ -217,10 +217,10 @@ class HomePresentBinarySensor(_DebouncedPresence):
             off_delay_min=entry.options.get(
                 CONF_HOME_OFF_DELAY, DEFAULT_HOME_OFF_DELAY
             ),
-            # No home source configured -> reads not-present (keeps the entity's
-            # documented default off). The house source is normally configured
-            # (spec §1.3); until it is, zones fall to Away rather than heating.
-            default_on=False,
+            # No home source configured -> reads present (spec §1.2): Away then
+            # never occurs and zones switch between Standby/Active instead of
+            # wrongly falling to Away. A deliberate choice (spec §1.2 / §11).
+            default_on=True,
         )
         self._attr_unique_id = KEY_HOME_PRESENT
         self._attr_device_info = device
@@ -230,9 +230,9 @@ class HomePresentBinarySensor(_DebouncedPresence):
 class ZoneWindowOpenBinarySensor(_DebouncedBinary):
     """Debounced mirror of the configured window sensor (spec §3).
 
-    Open is reacted to on the open-delay (default 0 = at once, for safety); closing
-    waits out the close-delay so a briefly cracked window or a flapping reed sensor
-    does not whipsaw the zone's setpoint. No window sensor configured -> stays off.
+    Open is reacted to on the open-delay (default 1 min, spec §3); closing waits out
+    the close-delay so a briefly cracked window or a flapping reed sensor does not
+    whipsaw the zone's setpoint. No window sensor configured -> stays off.
     """
 
     _attr_has_entity_name = True

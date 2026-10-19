@@ -23,6 +23,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from custom_components.zone_heating.backend_tado import (
     ATTR_ALL_DAYS,
     ATTR_BLOCKS,
+    ATTR_DAYS,
     ATTR_DURATION,
     ATTR_HVAC_MODE,
     ATTR_OVERLAY,
@@ -135,6 +136,8 @@ async def test_first_setup_writes_normal_baseline(hass: HomeAssistant) -> None:
     assert call.data[ATTR_ENTITY_ID] == [TARGET]
     assert call.data[ATTR_TIMETABLE] == TIMETABLE_ONE_DAY
     assert call.data[ATTR_ALL_DAYS] is True
+    # one_day plan -> no per-weekday ``days`` field (new backend signature, spec §8).
+    assert ATTR_DAYS not in call.data
     assert call.data[ATTR_BLOCKS] == [
         {"start": "00:00", "end": "24:00", "temperature": STANDBY_TEMP}
     ]

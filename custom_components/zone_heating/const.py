@@ -72,7 +72,7 @@ DEFAULT_HOME_OFF_DELAY = 10
 # draught must cut heating immediately). Close 5 = a short close-delay so a window
 # opened briefly for airing, or a flapping reed sensor, does not bounce the zone
 # back on only to shut it off again seconds later.
-DEFAULT_WINDOW_OPEN_DELAY = 0
+DEFAULT_WINDOW_OPEN_DELAY = 1
 DEFAULT_WINDOW_CLOSE_DELAY = 5
 DEFAULT_DEAD_MANS_SWITCH = True
 DEFAULT_OVERLAY_TERMINATION = OVERLAY_NEXT_BLOCK

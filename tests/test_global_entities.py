@@ -4,9 +4,29 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.zone_heating.const import DOMAIN
+from custom_components.zone_heating.const import (
+    DEFAULT_WINDOW_CLOSE_DELAY,
+    DEFAULT_WINDOW_OPEN_DELAY,
+    DOMAIN,
+)
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+
+def test_window_delay_defaults() -> None:
+    """Spec §3: window open-delay defaults to 1 min, close-delay to 5 min."""
+    assert DEFAULT_WINDOW_OPEN_DELAY == 1
+    assert DEFAULT_WINDOW_CLOSE_DELAY == 5
+
+
+async def test_home_present_defaults_on_without_source(
+    hass: HomeAssistant,
+) -> None:
+    """Spec §1.2: with no house source, heating_home_present reads ON (never Away)."""
+    await _setup_hub(hass)
+    state = hass.states.get("binary_sensor.heating_home_present")
+    assert state is not None
+    assert state.state == "on"
 
 
 async def _setup_hub(hass: HomeAssistant) -> MockConfigEntry:
@@ -36,8 +56,9 @@ async def test_global_entities_exist_with_defaults(hass: HomeAssistant) -> None:
         float(hass.states.get("number.heating_override_timeout").state) == 120.0
     )
 
-    # binary sensors exist and default to off (no control logic in F1).
-    assert hass.states.get("binary_sensor.heating_home_present").state == "off"
+    # Home-present defaults ON without a configured house source (spec §1.2): Away
+    # then never occurs, so a sourceless zone runs Standby/Active, not Away.
+    assert hass.states.get("binary_sensor.heating_home_present").state == "on"
     assert hass.states.get("binary_sensor.heating_in_fallback").state == "off"
 
 

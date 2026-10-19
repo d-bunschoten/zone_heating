@@ -101,9 +101,9 @@ from .const import (
     TICK_INTERVAL_MINUTES,
 )
 from .engine.baseline import (
-    BaselineTimetable,
+    BaselinePlan,
     ScheduleBlock as BaselineBlock,
-    derive_normal_baseline,
+    derive_normal_baseline_week,
     off_baseline,
 )
 from .engine.override import OverrideInputs, detect_custom_change
@@ -127,8 +127,8 @@ from .helpers import iter_zone_subentries, zone_name
 # ``get_schedule`` service (the entity state exposes just the current block).
 SCHEDULE_DOMAIN = "schedule"
 SCHEDULE_GET_SERVICE = "get_schedule"
-# HA schedule weekday keys, in order; the first configured day is the one the
-# derived (one_day) baseline uses (spec §8 budget: 1 call/zone -> all_days).
+# HA schedule weekday keys, in canonical order; the derived baseline keeps the
+# week's own shape (one_day when all days match, else seven_day; spec §8).
 _WEEKDAYS = (
     "monday",
     "tuesday",
@@ -1010,7 +1010,12 @@ class ZoneHeatingCoordinator:
 
     # --- baseline writes (spec §8) ------------------------------------------
     async def _async_write_normal_baseline(self, ctx: ZoneContext) -> None:
-        """Write the derived normal baseline for one zone (spec §8)."""
+        """Write the derived normal baseline for one zone (spec §8).
+
+        Reads the whole weekly standby schedule and derives the baseline in the
+        week's own shape: a ``one_day`` plan when every weekday matches, else a
+        ``seven_day`` plan with one write per distinct day-pattern.
+        """
         base = self._read_number(ctx.standby_number)
         if base is None:
             LOGGER.debug(
@@ -1018,63 +1023,84 @@ class ZoneHeatingCoordinator:
                 ctx.name,
             )
             return
-        day_blocks = await self._async_read_standby_day_blocks(ctx)
-        baseline = derive_normal_baseline(day_blocks, base)
-        await self._async_write_baseline_if_changed(ctx, baseline)
+        week = await self._async_read_standby_week(ctx)
+        plan = derive_normal_baseline_week(week, base, _WEEKDAYS)
+        await self._async_write_baseline_if_changed(ctx, plan)
 
     async def _async_write_off_baseline(self, ctx: ZoneContext) -> None:
         """Write the flat off/frost-protection baseline for one zone (spec §8)."""
-        baseline = off_baseline(ctx.off_baseline_temp)
-        await self._async_write_baseline_if_changed(ctx, baseline)
+        plan = off_baseline(ctx.off_baseline_temp)
+        await self._async_write_baseline_if_changed(ctx, plan)
 
     @staticmethod
-    def _baseline_signature(baseline: BaselineTimetable) -> str:
-        """A stable signature of a baseline, for the write-dedupe (spec §8)."""
+    def _baseline_signature(plan: BaselinePlan) -> str:
+        """A stable signature of the whole baseline plan, for the dedupe (spec §8).
+
+        Covers the timetable type and every write (its ``all_days``/weekdays and
+        blocks), so a change to any day-pattern rewrites the baseline.
+        """
         return json.dumps(
-            {"t": baseline.timetable, "b": list(baseline.blocks)},
+            {
+                "t": plan.timetable,
+                "w": [
+                    {
+                        "a": write.all_days,
+                        "d": list(write.weekdays),
+                        "b": list(write.blocks),
+                    }
+                    for write in plan.writes
+                ],
+            },
             sort_keys=True,
             default=str,
         )
 
     async def _async_write_baseline_if_changed(
-        self, ctx: ZoneContext, baseline: BaselineTimetable
+        self, ctx: ZoneContext, plan: BaselinePlan
     ) -> None:
-        """Write a baseline only when it changed from the last one (spec §8).
+        """Write a baseline plan only when it changed from the last one (spec §8).
 
-        The per-zone signature is persisted in the Store, so a reload/restart with
-        an unchanged baseline makes no needless Tado-cloud ``set_schedule`` call
-        (fixes the F4 note that every reload re-wrote the baseline).
+        The per-zone signature covers the whole plan and is persisted in the Store,
+        so a reload/restart with an unchanged baseline makes no needless Tado-cloud
+        ``set_schedule`` calls (fixes the F4 note that every reload re-wrote it).
+        When it did change, one ``set_schedule`` call is issued per write (one per
+        distinct day-pattern; spec §8 budget).
         """
         if not ctx.targets:
             return
         sid = ctx.subentry_id
-        signature = self._baseline_signature(baseline)
+        signature = self._baseline_signature(plan)
         if self._baseline_sigs.get(sid) == signature:
             LOGGER.debug(
                 "Zone %s baseline unchanged, skipping set_schedule (spec §8)",
                 ctx.name,
             )
             return
-        await self.backend.set_schedule(
-            ctx.targets, baseline.timetable, list(baseline.blocks)
-        )
+        for write in plan.writes:
+            await self.backend.set_schedule(
+                ctx.targets,
+                plan.timetable,
+                list(write.blocks),
+                all_days=write.all_days,
+                days=None if write.all_days else list(write.weekdays),
+            )
         self._baseline_sigs[sid] = signature
         if self._store is not None:
             await self._store.async_save(self._baseline_sigs)
 
-    async def _async_read_standby_day_blocks(
+    async def _async_read_standby_week(
         self, ctx: ZoneContext
-    ) -> list[BaselineBlock]:
-        """Read the standby schedule's representative day as baseline blocks.
+    ) -> dict[str, list[BaselineBlock]]:
+        """Read the whole weekly standby schedule as per-weekday baseline blocks.
 
-        The full weekly schedule is read via the ``schedule.get_schedule`` service;
-        the first configured weekday is used as the single daily curve (the
-        one_day/all_days baseline honours the "1 call/zone" budget, spec §8). No
-        schedule configured, or the helper unavailable -> an empty list (the pure
-        derivation then yields a flat base-temp curve).
+        The full weekly schedule is read via the ``schedule.get_schedule`` service.
+        Every weekday is returned (a missing/empty day -> an empty list, which the
+        pure derivation fills with a flat base-temp curve). No schedule configured,
+        or the helper unavailable -> every day empty (spec §8).
         """
+        empty: dict[str, list[BaselineBlock]] = {day: [] for day in _WEEKDAYS}
         if not ctx.standby_schedule:
-            return []
+            return empty
         try:
             response = await self.hass.services.async_call(
                 SCHEDULE_DOMAIN,
@@ -1091,17 +1117,15 @@ class ZoneHeatingCoordinator:
                 ctx.standby_schedule,
                 err,
             )
-            return []
+            return empty
         if not isinstance(response, dict):
-            return []
+            return empty
         week = response.get(ctx.standby_schedule, response)
         if not isinstance(week, dict):
-            return []
-        for day in _WEEKDAYS:
-            entries = week.get(day)
-            if entries:
-                return _entries_to_blocks(entries)
-        return []
+            return empty
+        return {
+            day: _entries_to_blocks(week.get(day)) for day in _WEEKDAYS
+        }
 
     # --- Custom detection (spec §5) -----------------------------------------
     async def _async_maybe_custom(self, sid: str, reported: float) -> None:

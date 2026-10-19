@@ -26,10 +26,14 @@ from homeassistant.components.climate import (
 )
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE
-from homeassistant.core import HomeAssistant, ServiceCall, State
+from homeassistant.core import HomeAssistant, ServiceCall, State, SupportsResponse
 
 from custom_components.zone_heating.backend_tado import (
+    ATTR_ALL_DAYS,
+    ATTR_BLOCKS,
+    ATTR_DAYS,
     ATTR_HVAC_MODE,
+    ATTR_TIMETABLE,
     TADO_DOMAIN,
     TADO_SERVICE_SET_MODE,
     TADO_SERVICE_SET_SCHEDULE,
@@ -42,6 +46,7 @@ from custom_components.zone_heating.const import (
     CONF_OFF_DELAY,
     CONF_ON_DELAY,
     CONF_PRESENCE_ENTITY,
+    CONF_STANDBY_SCHEDULE,
     CONF_TARGETS,
     CONF_WINDOW_CLOSE_DELAY,
     CONF_WINDOW_OPEN_DELAY,
@@ -49,6 +54,7 @@ from custom_components.zone_heating.const import (
     DOMAIN,
     SUBENTRY_TYPE_ZONE,
 )
+from custom_components.zone_heating.engine.baseline import TIMETABLE_SEVEN_DAY
 
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -381,3 +387,106 @@ async def test_reload_changed_baseline_rewrites(hass: HomeAssistant) -> None:
 
     assert len(sched_calls) == 2  # changed -> new set_schedule
     assert sched_calls[-1].data["blocks"][0]["temperature"] == 19.0
+
+
+# --- per-day baseline -> seven_day, one write per pattern (spec §8) ----------
+STANDBY_SCHEDULE = "schedule.woonkamer_standby"
+
+
+def _entry(from_t: str, to_t: str, temp: float) -> dict:
+    return {"from": from_t, "to": to_t, "data": {"temperature": temp}}
+
+
+def _register_weekly_schedule(hass: HomeAssistant, week: dict) -> None:
+    """Register a ``schedule.get_schedule`` stub returning ``week`` for the entity."""
+
+    async def _handler(call: ServiceCall) -> dict:
+        return {STANDBY_SCHEDULE: week}
+
+    hass.services.async_register(
+        "schedule",
+        "get_schedule",
+        _handler,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+
+async def test_per_day_schedule_writes_seven_day_grouped(
+    hass: HomeAssistant,
+) -> None:
+    """A weekday/weekend split -> seven_day baseline, 2 grouped writes (spec §8)."""
+    weekday = [_entry("06:00:00", "08:00:00", 21.0)]
+    weekend = [_entry("09:00:00", "11:00:00", 20.0)]
+    week = {
+        "monday": weekday,
+        "tuesday": weekday,
+        "wednesday": weekday,
+        "thursday": weekday,
+        "friday": weekday,
+        "saturday": weekend,
+        "sunday": weekend,
+    }
+    _register_weekly_schedule(hass, week)
+
+    _, _, sched_calls = await _setup(
+        hass,
+        home="on",
+        zone="off",
+        subentry_extra={CONF_STANDBY_SCHEDULE: STANDBY_SCHEDULE},
+    )
+
+    # One backend.set_schedule call per distinct day-pattern (2 here).
+    assert len(sched_calls) == 2
+    for call in sched_calls:
+        assert call.data[ATTR_TIMETABLE] == TIMETABLE_SEVEN_DAY
+        assert call.data[ATTR_ALL_DAYS] is False
+        assert ATTR_DAYS in call.data
+
+    by_days = {tuple(call.data[ATTR_DAYS]): call for call in sched_calls}
+    assert ("monday", "tuesday", "wednesday", "thursday", "friday") in by_days
+    assert ("saturday", "sunday") in by_days
+    weekday_call = by_days[
+        ("monday", "tuesday", "wednesday", "thursday", "friday")
+    ]
+    weekend_call = by_days[("saturday", "sunday")]
+    assert {"start": "06:00", "end": "08:00", "temperature": 21.0} in weekday_call.data[
+        ATTR_BLOCKS
+    ]
+    assert {"start": "09:00", "end": "11:00", "temperature": 20.0} in weekend_call.data[
+        ATTR_BLOCKS
+    ]
+
+
+async def test_per_day_schedule_dedupe_over_whole_plan(
+    hass: HomeAssistant,
+) -> None:
+    """A reload with an unchanged per-day schedule writes nothing new (spec §8).
+
+    The dedupe signature spans the whole seven_day plan (both writes), so an
+    unchanged multi-write baseline makes no fresh set_schedule calls.
+    """
+    weekday = [_entry("06:00:00", "08:00:00", 21.0)]
+    weekend = [_entry("09:00:00", "11:00:00", 20.0)]
+    week = {
+        "monday": weekday,
+        "tuesday": weekday,
+        "wednesday": weekday,
+        "thursday": weekday,
+        "friday": weekday,
+        "saturday": weekend,
+        "sunday": weekend,
+    }
+    _register_weekly_schedule(hass, week)
+
+    entry, _, sched_calls = await _setup(
+        hass,
+        home="on",
+        zone="off",
+        subentry_extra={CONF_STANDBY_SCHEDULE: STANDBY_SCHEDULE},
+    )
+    assert len(sched_calls) == 2  # first-setup: one write per pattern
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert len(sched_calls) == 2  # unchanged whole plan -> no new writes

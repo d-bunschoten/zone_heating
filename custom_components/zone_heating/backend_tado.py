@@ -34,6 +34,7 @@ ATTR_OVERLAY = "overlay"
 ATTR_DURATION = "duration"
 ATTR_TIMETABLE = "timetable"
 ATTR_ALL_DAYS = "all_days"
+ATTR_DAYS = "days"
 ATTR_BLOCKS = "blocks"
 ATTR_ACTIVATE = "activate"
 
@@ -103,19 +104,30 @@ class TadoBackend(HeatingBackend):
         targets: list[str],
         timetable: str,
         blocks: list[dict[str, object]],
+        *,
+        all_days: bool = True,
+        days: list[str] | None = None,
     ) -> None:
-        """Write a baseline timetable for the zone (1 call/zone, spec §8)."""
+        """Write one baseline timetable write for the zone (spec §8).
+
+        ``all_days`` True -> ``one_day`` for every weekday; otherwise a ``seven_day``
+        write carrying the weekday names in ``days`` (tado_hijack accepts "monday"..
+        "sunday"). One call maps to one distinct day-pattern.
+        """
         if not targets:
             return
+        data: dict[str, object] = {
+            ATTR_ENTITY_ID: targets,
+            ATTR_TIMETABLE: timetable,
+            ATTR_ALL_DAYS: all_days,
+            ATTR_BLOCKS: blocks,
+            ATTR_ACTIVATE: True,
+        }
+        if not all_days and days:
+            data[ATTR_DAYS] = days
         await self._hass.services.async_call(
             TADO_DOMAIN,
             TADO_SERVICE_SET_SCHEDULE,
-            {
-                ATTR_ENTITY_ID: targets,
-                ATTR_TIMETABLE: timetable,
-                ATTR_ALL_DAYS: True,
-                ATTR_BLOCKS: blocks,
-                ATTR_ACTIVATE: True,
-            },
+            data,
             blocking=True,
         )

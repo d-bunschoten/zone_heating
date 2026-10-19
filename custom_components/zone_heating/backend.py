@@ -58,5 +58,13 @@ class HeatingBackend(ABC):
         targets: list[str],
         timetable: str,
         blocks: list[dict[str, object]],
+        *,
+        all_days: bool = True,
+        days: list[str] | None = None,
     ) -> None:
-        """Write a baseline Tado timetable for the zone (1 call/zone, spec §8)."""
+        """Write one baseline timetable write for the zone (spec §8).
+
+        ``all_days`` True applies the blocks to every weekday (``one_day``); when
+        False, ``days`` lists the weekday names this ``seven_day`` write covers. The
+        coordinator issues one call per distinct day-pattern (1 cloud-call/dayType).
+        """

@@ -64,6 +64,9 @@ class GenericBackend(HeatingBackend):
         targets: list[str],
         timetable: str,
         blocks: list[dict[str, object]],
+        *,
+        all_days: bool = True,
+        days: list[str] | None = None,
     ) -> None:
         # Plain climate entities have no writable baseline timetable; the baseline
         # is a Tado concept. Nothing to do here.
