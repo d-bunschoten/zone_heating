@@ -26,6 +26,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ACTIVE_SCHEDULE,
+    CONF_ACTIVE_SCHEDULE_GATE,
     CONF_DEAD_MANS_SWITCH,
     CONF_HOME_OFF_DELAY,
     CONF_HOME_ON_DELAY,
@@ -45,6 +46,7 @@ from .const import (
     CONF_WINDOW_CLOSE_DELAY,
     CONF_WINDOW_OPEN_DELAY,
     CONF_WINDOW_SENSOR,
+    DEFAULT_ACTIVE_SCHEDULE_GATE,
     DEFAULT_DEAD_MANS_SWITCH,
     DEFAULT_HOME_OFF_DELAY,
     DEFAULT_HOME_ON_DELAY,
@@ -148,6 +150,12 @@ def _zone_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="schedule")
             ),
+            vol.Optional(
+                CONF_ACTIVE_SCHEDULE_GATE,
+                default=defaults.get(
+                    CONF_ACTIVE_SCHEDULE_GATE, DEFAULT_ACTIVE_SCHEDULE_GATE
+                ),
+            ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_OFF_BASELINE_TEMP,
                 default=defaults.get(

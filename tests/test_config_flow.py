@@ -8,7 +8,9 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
+from custom_components.zone_heating.config_flow import _zone_schema
 from custom_components.zone_heating.const import (
+    CONF_ACTIVE_SCHEDULE_GATE,
     CONF_NAME,
     CONF_OFF_DELAY,
     CONF_ON_DELAY,
@@ -133,3 +135,16 @@ async def test_zone_subentry_flow_creates_device_and_entities(
     device = device_reg.async_get(device_ids.pop())
     assert device is not None
     assert device.name == "Woonkamer"
+
+
+def test_zone_schema_has_active_schedule_gate_default_true() -> None:
+    """The zone schema exposes active_schedule_gate, defaulting to True (F5.7)."""
+    schema = _zone_schema()
+    markers = [
+        key
+        for key in schema.schema
+        if getattr(key, "schema", key) == CONF_ACTIVE_SCHEDULE_GATE
+    ]
+    assert markers, "active_schedule_gate missing from the zone schema"
+    # vol.Optional wraps the default in a callable factory.
+    assert markers[0].default() is True

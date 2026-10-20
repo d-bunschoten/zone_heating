@@ -60,6 +60,7 @@
             "schedule_switch": "Tado schedule switch (optional)",
             "standby_schedule": "Standby schedule helper",
             "active_schedule": "Active schedule helper",
+            "active_schedule_gate": "Active schedule gate",
             "off_baseline_temp": "Off / frost-protection temperature (°C)"
           },
           "data_description": {
@@ -75,6 +76,7 @@
             "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive it from the matching schedule switch of the first target. You create the schedule helpers yourself.",
             "standby_schedule": "Optional schedule helper that varies the standby temperature per time block; create it yourself under Settings → Devices & Services → Helpers.",
             "active_schedule": "Optional schedule helper that varies the active temperature per block and gates when Active is allowed.",
+            "active_schedule_gate": "Only applies with an Active schedule. On (default): in auto, Active is allowed only during an on-block; a gap drops the zone to Standby. Off: Active works like Standby — the on-block temperature if there is a block now, otherwise the active-temperature base — with no time gate.",
             "off_baseline_temp": "Frost-protection setpoint written to the thermostat while the master mode is Off."
           }
         },
@@ -94,6 +96,7 @@
             "schedule_switch": "Tado schedule switch (optional)",
             "standby_schedule": "Standby schedule helper",
             "active_schedule": "Active schedule helper",
+            "active_schedule_gate": "Active schedule gate",
             "off_baseline_temp": "Off / frost-protection temperature (°C)"
           },
           "data_description": {
@@ -109,6 +112,7 @@
             "schedule_switch": "The tado_hijack schedule switch for this zone. Leave empty to derive it from the matching schedule switch of the first target. You create the schedule helpers yourself.",
             "standby_schedule": "Optional schedule helper that varies the standby temperature per time block; create it yourself under Settings → Devices & Services → Helpers.",
             "active_schedule": "Optional schedule helper that varies the active temperature per block and gates when Active is allowed.",
+            "active_schedule_gate": "Only applies with an Active schedule. On (default): in auto, Active is allowed only during an on-block; a gap drops the zone to Standby. Off: Active works like Standby — the on-block temperature if there is a block now, otherwise the active-temperature base — with no time gate.",
             "off_baseline_temp": "Frost-protection setpoint written to the thermostat while the master mode is Off."
           }
         }

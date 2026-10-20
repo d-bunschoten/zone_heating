@@ -19,6 +19,7 @@ from custom_components.zone_heating.backend_tado import (
 )
 from custom_components.zone_heating.const import (
     CONF_ACTIVE_SCHEDULE,
+    CONF_ACTIVE_SCHEDULE_GATE,
     CONF_HOME_OFF_DELAY,
     CONF_HOME_ON_DELAY,
     CONF_HOME_PRESENCE_ENTITY,
@@ -195,9 +196,17 @@ ACTIVE_SCHEDULE = "schedule.living_active"
 
 
 async def _setup_with_active_schedule(
-    hass: HomeAssistant, *, schedule_state: str, block_temp: float | None
+    hass: HomeAssistant,
+    *,
+    schedule_state: str,
+    block_temp: float | None,
+    active_gate: bool | None = None,
 ) -> tuple[MockConfigEntry, list[ServiceCall]]:
-    """Home + present, with an active_schedule gate in the given state."""
+    """Home + present, with an active_schedule gate in the given state.
+
+    ``active_gate`` left as ``None`` omits the config key so the default (gate on)
+    is exercised; pass ``True``/``False`` to set it explicitly.
+    """
     hass.states.async_set(HOME_SOURCE, "on")
     hass.states.async_set(ZONE_SOURCE, "on")
     attrs = {"temperature": block_temp} if block_temp is not None else {}
@@ -206,15 +215,18 @@ async def _setup_with_active_schedule(
     calls = async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_MODE)
     async_mock_service(hass, TADO_DOMAIN, TADO_SERVICE_SET_SCHEDULE)
 
+    zone_data = {
+        CONF_NAME: "Woonkamer",
+        CONF_TARGETS: [TARGET],
+        CONF_PRESENCE_ENTITY: ZONE_SOURCE,
+        CONF_ON_DELAY: 0,
+        CONF_OFF_DELAY: 0,
+        CONF_ACTIVE_SCHEDULE: ACTIVE_SCHEDULE,
+    }
+    if active_gate is not None:
+        zone_data[CONF_ACTIVE_SCHEDULE_GATE] = active_gate
     subentry = ConfigSubentryData(
-        data={
-            CONF_NAME: "Woonkamer",
-            CONF_TARGETS: [TARGET],
-            CONF_PRESENCE_ENTITY: ZONE_SOURCE,
-            CONF_ON_DELAY: 0,
-            CONF_OFF_DELAY: 0,
-            CONF_ACTIVE_SCHEDULE: ACTIVE_SCHEDULE,
-        },
+        data=zone_data,
         subentry_type=SUBENTRY_TYPE_ZONE,
         title="Woonkamer",
         unique_id=None,
@@ -256,6 +268,32 @@ async def test_active_schedule_gap_falls_to_standby(
     """Present but active schedule gap -> gate closed -> Standby (spec §1.1)."""
     _, calls = await _setup_with_active_schedule(
         hass, schedule_state="off", block_temp=None
+    )
+    assert calls[-1].data[ATTR_TEMPERATURE] == STANDBY_TEMP
+    assert hass.states.get("climate.woonkamer").attributes["zone_state"] == (
+        "Standby"
+    )
+
+
+async def test_active_schedule_gap_gate_off_stays_active(
+    hass: HomeAssistant,
+) -> None:
+    """Gate off: present + gap -> Active on active_temp, no time-poort (F5.7)."""
+    _, calls = await _setup_with_active_schedule(
+        hass, schedule_state="off", block_temp=None, active_gate=False
+    )
+    assert calls[-1].data[ATTR_TEMPERATURE] == ACTIVE_TEMP
+    assert hass.states.get("climate.woonkamer").attributes["zone_state"] == (
+        "Active"
+    )
+
+
+async def test_active_schedule_gap_gate_on_explicit_standby(
+    hass: HomeAssistant,
+) -> None:
+    """Gate explicitly on: present + gap -> Standby (current behaviour, F5.7)."""
+    _, calls = await _setup_with_active_schedule(
+        hass, schedule_state="off", block_temp=None, active_gate=True
     )
     assert calls[-1].data[ATTR_TEMPERATURE] == STANDBY_TEMP
     assert hass.states.get("climate.woonkamer").attributes["zone_state"] == (

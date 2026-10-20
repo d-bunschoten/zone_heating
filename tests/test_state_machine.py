@@ -80,8 +80,41 @@ CASES = [
         PRESET_ACTIVE,
     ),
     (
-        "present, active schedule gap -> Standby (gate closed)",
+        "present, active schedule gap, gate on -> Standby (gate closed)",
         _inp(present=True, active_schedule=ScheduleState(block_temp=None)),
+        STAND_STANDBY,
+        STANDBY,
+        PRESET_STANDBY,
+    ),
+    (
+        "present, active schedule gap, gate OFF -> Active at active_temp base",
+        _inp(
+            present=True,
+            active_schedule=ScheduleState(block_temp=None),
+            active_gate=False,
+        ),
+        STAND_ACTIVE,
+        ACTIVE,
+        PRESET_ACTIVE,
+    ),
+    (
+        "present, active schedule on-block, gate OFF -> Active at block temp",
+        _inp(
+            present=True,
+            active_schedule=ScheduleState(block_temp=21.5),
+            active_gate=False,
+        ),
+        STAND_ACTIVE,
+        21.5,
+        PRESET_ACTIVE,
+    ),
+    (
+        "not present, active schedule gap, gate OFF -> Standby (presence still gates)",
+        _inp(
+            present=False,
+            active_schedule=ScheduleState(block_temp=None),
+            active_gate=False,
+        ),
         STAND_STANDBY,
         STANDBY,
         PRESET_STANDBY,

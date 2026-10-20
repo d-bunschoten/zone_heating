@@ -60,6 +60,7 @@
             "schedule_switch": "Tado-schemaschakelaar (optioneel)",
             "standby_schedule": "Standby-schemahelper",
             "active_schedule": "Actief-schemahelper",
+            "active_schedule_gate": "Active-schema poort",
             "off_baseline_temp": "Uit- / vorstbeveiligingstemperatuur (°C)"
           },
           "data_description": {
@@ -75,6 +76,7 @@
             "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om hem af te leiden uit de bijbehorende schemaschakelaar van het eerste doel. De schemahelpers maak je zelf aan.",
             "standby_schedule": "Optionele schemahelper die de standby-temperatuur per tijdblok laat variëren; maak je zelf aan via Instellingen → Apparaten en diensten → Helpers.",
             "active_schedule": "Optionele schemahelper die de actief-temperatuur per blok laat variëren en bepaalt wanneer Actief is toegestaan.",
+            "active_schedule_gate": "Geldt alleen met een actief-schema. Aan (standaard): in auto is Actief alleen toegestaan tijdens een on-blok; een gat laat de zone terugvallen naar Standby. Uit: Actief werkt net als Standby — de on-blok-temperatuur als er nu een blok is, anders de actief-basistemperatuur — zonder tijd-poort.",
             "off_baseline_temp": "Vorstbeveiligings-setpoint dat naar de thermostaat wordt geschreven terwijl de master-stand Off is."
           }
         },
@@ -94,6 +96,7 @@
             "schedule_switch": "Tado-schemaschakelaar (optioneel)",
             "standby_schedule": "Standby-schemahelper",
             "active_schedule": "Actief-schemahelper",
+            "active_schedule_gate": "Active-schema poort",
             "off_baseline_temp": "Uit- / vorstbeveiligingstemperatuur (°C)"
           },
           "data_description": {
@@ -109,6 +112,7 @@
             "schedule_switch": "De tado_hijack-schemaschakelaar voor deze zone. Laat leeg om hem af te leiden uit de bijbehorende schemaschakelaar van het eerste doel. De schemahelpers maak je zelf aan.",
             "standby_schedule": "Optionele schemahelper die de standby-temperatuur per tijdblok laat variëren; maak je zelf aan via Instellingen → Apparaten en diensten → Helpers.",
             "active_schedule": "Optionele schemahelper die de actief-temperatuur per blok laat variëren en bepaalt wanneer Actief is toegestaan.",
+            "active_schedule_gate": "Geldt alleen met een actief-schema. Aan (standaard): in auto is Actief alleen toegestaan tijdens een on-blok; een gat laat de zone terugvallen naar Standby. Uit: Actief werkt net als Standby — de on-blok-temperatuur als er nu een blok is, anders de actief-basistemperatuur — zonder tijd-poort.",
             "off_baseline_temp": "Vorstbeveiligings-setpoint dat naar de thermostaat wordt geschreven terwijl de master-stand Off is."
           }
         }

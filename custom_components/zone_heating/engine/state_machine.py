@@ -77,6 +77,11 @@ class AutoInputs:
     # ``None`` means the stand has no schedule configured.
     active_schedule: ScheduleState | None = None
     standby_schedule: ScheduleState | None = None
+    # Per-zone Active-schedule gate (spec §3). Only relevant with an
+    # ``active_schedule``. ``True`` (default) keeps the time-gate: in a gap Active
+    # is not allowed (-> Standby). ``False`` lifts the gate: a gap falls back to
+    # Active on ``active_temp`` (block-or-base), like Standby, no time-gate.
+    active_gate: bool = True
     # --- manual control inputs (hvac_mode=heat, spec §3 "heat") -------------
     # ``preset`` selects the forced stand in ``heat``: one of PRESET_AWAY /
     # PRESET_STANDBY / PRESET_ACTIVE / PRESET_BOOST, or ``None`` for **Custom**
@@ -105,15 +110,21 @@ def _active_allowed(inp: AutoInputs) -> tuple[bool, float | None]:
 
     - No ``active_schedule`` configured -> the gate is lifted: Active is allowed
       whenever present, at the ``active_temp`` base.
-    - ``active_schedule`` configured -> Active is allowed *only* during an
-      on-block, at that block's temperature; a gap means not allowed.
+    - ``active_schedule`` configured, on-block now -> Active allowed at that
+      block's temperature.
+    - ``active_schedule`` configured, gap now:
+      - ``active_gate`` True (default) -> the time-gate holds: not allowed.
+      - ``active_gate`` False -> gate lifted: allowed on the ``active_temp`` base
+        (block-or-base, like Standby), also outside the on-blocks.
     """
     sched = inp.active_schedule
     if sched is None:
         return True, inp.active_temp
     if sched.block_temp is not None:
         return True, sched.block_temp
-    return False, None
+    if inp.active_gate:
+        return False, None
+    return True, inp.active_temp
 
 
 def _standby_temp(inp: AutoInputs) -> float:

@@ -43,6 +43,12 @@ CONF_WINDOW_CLOSE_DELAY = "window_close_delay"
 CONF_SCHEDULE_SWITCH = "schedule_switch"
 CONF_STANDBY_SCHEDULE = "standby_schedule"
 CONF_ACTIVE_SCHEDULE = "active_schedule"
+# Per-zone switch for the Active-schedule gate (spec §3). Only has effect when an
+# ``active_schedule`` is set. ``True`` (default) = current behaviour: in auto,
+# Active is only allowed during an on-block; a gap -> Standby. ``False`` lifts the
+# time-gate so Active works like Standby temperature-wise (block-or-base on
+# ``active_temp``) whenever present, also outside the on-blocks.
+CONF_ACTIVE_SCHEDULE_GATE = "active_schedule_gate"
 # Off/frost-protection baseline temperature written to Tado in master mode Off
 # (spec §8: the off-baseline is configured per zone; the normal baseline is
 # derived). A single flat temperature is the simplest fit for "vorstbeveiliging".
@@ -74,6 +80,8 @@ DEFAULT_HOME_OFF_DELAY = 10
 # back on only to shut it off again seconds later.
 DEFAULT_WINDOW_OPEN_DELAY = 1
 DEFAULT_WINDOW_CLOSE_DELAY = 5
+# Active-schedule gate on by default = current behaviour (spec §3).
+DEFAULT_ACTIVE_SCHEDULE_GATE = True
 DEFAULT_DEAD_MANS_SWITCH = True
 DEFAULT_OVERLAY_TERMINATION = OVERLAY_NEXT_BLOCK
 DEFAULT_OVERLAY_TIMER_DURATION = 60

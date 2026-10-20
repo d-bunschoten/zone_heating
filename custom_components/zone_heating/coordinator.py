@@ -57,6 +57,7 @@ from homeassistant.util import dt as dt_util
 from .backend import HeatingBackend, OverlayTermination
 from .const import (
     CONF_ACTIVE_SCHEDULE,
+    CONF_ACTIVE_SCHEDULE_GATE,
     CONF_DEAD_MANS_SWITCH,
     CONF_OFF_BASELINE_TEMP,
     CONF_OVERLAY_TERMINATION,
@@ -66,6 +67,7 @@ from .const import (
     CONF_TARGETS,
     CONTROL_SOURCE_HA_OVERLAY,
     CONTROL_SOURCE_TADO_SCHEDULE,
+    DEFAULT_ACTIVE_SCHEDULE_GATE,
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMP,
     DEFAULT_DEAD_MANS_SWITCH,
@@ -190,6 +192,10 @@ class ZoneContext:
     # Referenced schedule helper entity_ids (``None`` => no schedule, spec §1.1).
     standby_schedule: str | None = None
     active_schedule: str | None = None
+    # Per-zone Active-schedule gate (spec §3). Only relevant with an
+    # ``active_schedule``; ``True`` (default) keeps the auto time-gate, ``False``
+    # lets Active run block-or-base like Standby, no time-gate.
+    active_gate: bool = DEFAULT_ACTIVE_SCHEDULE_GATE
     # Off/frost-protection baseline temperature (spec §8).
     off_baseline_temp: float = DEFAULT_OFF_BASELINE_TEMP
     # ``switch.<zone>_schedule`` (spec §5): ``on`` = zone follows Tado schedule,
@@ -357,6 +363,9 @@ class ZoneHeatingCoordinator:
                 ),
                 standby_schedule=subentry.data.get(CONF_STANDBY_SCHEDULE),
                 active_schedule=subentry.data.get(CONF_ACTIVE_SCHEDULE),
+                active_gate=subentry.data.get(
+                    CONF_ACTIVE_SCHEDULE_GATE, DEFAULT_ACTIVE_SCHEDULE_GATE
+                ),
                 off_baseline_temp=float(
                     subentry.data.get(
                         CONF_OFF_BASELINE_TEMP, DEFAULT_OFF_BASELINE_TEMP
@@ -1523,6 +1532,7 @@ class ZoneHeatingCoordinator:
             active_temp=active,
             active_schedule=self._read_schedule(ctx.active_schedule),
             standby_schedule=self._read_schedule(ctx.standby_schedule),
+            active_gate=ctx.active_gate,
             preset=ms.preset,
             custom_setpoint=ms.custom_setpoint,
             boost_temp=boost,
