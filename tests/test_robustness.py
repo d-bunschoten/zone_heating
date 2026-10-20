@@ -245,6 +245,41 @@ async def test_window_open_turns_off_and_restores_mode(
     assert mode_calls[-1].data[ATTR_TEMPERATURE] == ACTIVE_TEMP
 
 
+async def test_set_temperature_ignored_while_window_open(
+    hass: HomeAssistant,
+) -> None:
+    """Dialing a setpoint while the window is open is ignored (spec §3/§4).
+
+    The window-open safety modifier force-offs the zone; a dial must not fight it
+    (a manual *off* zone, by contrast, does turn back on when dialed).
+    """
+    _, mode_calls, _ = await _setup(
+        hass,
+        home="on",
+        zone="on",
+        subentry_extra={
+            CONF_WINDOW_SENSOR: WINDOW_SOURCE,
+            CONF_WINDOW_OPEN_DELAY: 0,
+            CONF_WINDOW_CLOSE_DELAY: 5,
+        },
+    )
+    hass.states.async_set(WINDOW_SOURCE, "on")  # window open -> zone force-off
+    await hass.async_block_till_done()
+    assert hass.states.get(CLIMATE).attributes["zone_state"] == "Window-open"
+
+    await hass.services.async_call(
+        CLIMATE_DOMAIN,
+        "set_temperature",
+        {ATTR_ENTITY_ID: CLIMATE, ATTR_TEMPERATURE: 26},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get(CLIMATE)
+    assert state.state == "off"  # still off; the dial did not turn it on
+    assert state.attributes["zone_state"] == "Window-open"
+
+
 # --- overlay expiry is an expected fallback, not Custom (spec §5 step 3) -----
 async def test_overlay_expiry_not_custom(
     hass: HomeAssistant, freezer

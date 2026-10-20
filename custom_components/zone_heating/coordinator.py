@@ -679,9 +679,17 @@ class ZoneHeatingCoordinator:
         await self.async_refresh()
 
     async def async_set_zone_custom(self, sid: str, temperature: float) -> None:
-        """Handle ``climate.set_temperature`` -> Custom on ``T`` (spec §4)."""
+        """Handle ``climate.set_temperature`` -> Custom on ``T`` (spec §4).
+
+        A manually ``off`` zone turns back on to Custom when dialed. But while the
+        window is open the zone is force-off by the safety modifier (spec §3); a
+        dialed setpoint must not fight it, so it is ignored.
+        """
         ms = self.manual.get(sid)
         if ms is None:
+            return
+        ctx = self.zones.get(sid)
+        if ctx is not None and self._read_binary(ctx.window_binary):
             return
         ms.hvac_mode = HVAC_HEAT
         ms.preset = None

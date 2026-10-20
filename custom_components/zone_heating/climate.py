@@ -235,7 +235,12 @@ class ZoneClimate(ClimateEntity, RestoreEntity):
 
     # --- Interaction (spec §4) ----------------------------------------------
     async def async_set_temperature(self, **kwargs: object) -> None:
-        """Dial a temperature -> Custom (hvac_mode=heat, preset=none)."""
+        """Dial a temperature -> Custom (hvac_mode=heat, preset=none).
+
+        A zone that is manually ``off`` turns back on to Custom when dialed; but a
+        dial during **window-open** is ignored by the coordinator (the safety
+        modifier wins, spec §3/§4).
+        """
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
