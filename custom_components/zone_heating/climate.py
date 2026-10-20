@@ -45,7 +45,7 @@ from .const import (
     ZONE_PRESET_MODES,
 )
 from .coordinator import ZoneHeatingCoordinator, ZoneRuntimeState
-from .engine.state_machine import STAND_OFF, STAND_WINDOW_OPEN
+from .engine.state_machine import STAND_FALLBACK, STAND_OFF, STAND_WINDOW_OPEN
 from .helpers import iter_zone_subentries, zone_device_info, zone_name
 
 
@@ -185,11 +185,24 @@ class ZoneClimate(ClimateEntity, RestoreEntity):
         While the zone is off or window-open the device holds frost protection, so
         the dial shows the off/frost temp (not a stale last setpoint); it returns to
         the chosen/auto setpoint as soon as the zone leaves off (spec §4/§8).
+
+        In master Fallback ``runtime.setpoint`` is ``None`` (HA observes, the zone
+        runs the Tado normal-baseline). Show that live baseline/standby temp instead
+        of a stale value, so the dial reflects the curve the zone actually runs on
+        (spec §2.1).
         """
         runtime = self._runtime
         if runtime is not None and runtime.setpoint is not None:
             return runtime.setpoint
         coord = self._coordinator
+        if (
+            coord is not None
+            and runtime is not None
+            and runtime.zone_state == STAND_FALLBACK
+        ):
+            fallback_temp = coord.zone_fallback_temp(self._subentry_id)
+            if fallback_temp is not None:
+                return fallback_temp
         if (
             coord is not None
             and runtime is not None

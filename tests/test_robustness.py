@@ -492,6 +492,45 @@ async def test_per_day_schedule_writes_seven_day_grouped(
     ]
 
 
+# --- Fallback shows the baseline/standby temp, not a stale value (spec §2.1) --
+async def test_fallback_shows_standby_base_temp(hass: HomeAssistant) -> None:
+    """In master Fallback the dial shows the standby base temp, not a stale one."""
+    async_mock_service(hass, "switch", "turn_on")  # swallow the schedule resume
+
+    # Present -> the zone runs Active (20) in auto first.
+    await _setup(hass, home="on", zone="on", switch="off")
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == ACTIVE_TEMP
+
+    await _select(hass, "fallback")
+
+    state = hass.states.get(CLIMATE)
+    assert state.attributes["zone_state"] == "Fallback"
+    # Not the stale Active 20: Fallback shows the standby base temp (block-or-base).
+    assert state.attributes[ATTR_TEMPERATURE] == STANDBY_TEMP
+
+
+async def test_fallback_shows_standby_block_temp(hass: HomeAssistant) -> None:
+    """With a standby-schedule block active now, Fallback shows that block temp."""
+    async_mock_service(hass, "switch", "turn_on")
+    # An on-block on the standby schedule carries its block temperature now.
+    hass.states.async_set(STANDBY_SCHEDULE, "on", {"temperature": 19.5})
+
+    await _setup(
+        hass,
+        home="on",
+        zone="on",
+        switch="off",
+        subentry_extra={CONF_STANDBY_SCHEDULE: STANDBY_SCHEDULE},
+    )
+
+    await _select(hass, "fallback")
+
+    state = hass.states.get(CLIMATE)
+    assert state.attributes["zone_state"] == "Fallback"
+    # block-or-base: a live block wins over the standby base temp.
+    assert state.attributes[ATTR_TEMPERATURE] == 19.5
+
+
 async def test_per_day_schedule_dedupe_over_whole_plan(
     hass: HomeAssistant,
 ) -> None:

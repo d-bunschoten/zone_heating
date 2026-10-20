@@ -30,6 +30,7 @@ from functools import partial
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_TEMPERATURE,
+    SERVICE_TURN_ON,
     STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
@@ -762,6 +763,23 @@ class ZoneHeatingCoordinator:
         ctx = self.zones.get(sid)
         return ctx.off_baseline_temp if ctx else None
 
+    def zone_fallback_temp(self, sid: str) -> float | None:
+        """The live normal-baseline (standby) temp the zone runs on in Fallback (§2.1).
+
+        In master Fallback the zone follows the Tado normal-baseline (the standby
+        curve), so the climate entity shows that temp instead of a stale setpoint.
+        Same "block-or-base" logic as Standby: the current standby-schedule block
+        temperature when there is a block now, otherwise the standby base temp
+        (``number.<zone>_standby_temp``). ``None`` when nothing is resolvable.
+        """
+        ctx = self.zones.get(sid)
+        if ctx is None:
+            return None
+        schedule = self._read_schedule(ctx.standby_schedule)
+        if schedule is not None and schedule.block_temp is not None:
+            return schedule.block_temp
+        return self._read_number(ctx.standby_number)
+
     def zone_override_remaining_min(self, sid: str) -> int | None:
         """Minutes left on the respect-window / boost timer (None if sticky)."""
         ms = self.manual.get(sid)
@@ -939,7 +957,8 @@ class ZoneHeatingCoordinator:
         """Master mode fallback: stop asserting overlays, just observe (spec §2).
 
         ``reset_zones`` (a live switch into Fallback) returns every zone to ``auto``
-        so none stays stuck in a prior ``off``/manual stand while HA observes.
+        so none stays stuck in a prior ``off``/manual stand while HA observes, and
+        resumes every zone **directly** onto its Tado schedule (spec §2.1).
         """
         if reset_zones:
             for sid in self.manual:
@@ -950,8 +969,42 @@ class ZoneHeatingCoordinator:
         # Drop the applied-command cache so returning to auto re-asserts overlays
         # (the zone may have drifted onto its Tado schedule while in fallback).
         for ctx in self.zones.values():
+            # On a deliberate switch into Fallback (the reset_zones path, i.e.
+            # ``previous is not None``) resume every zone with a configured
+            # schedule switch directly onto its Tado schedule (spec §2.1): the
+            # overlay would otherwise only lapse on its ``next_block`` termination
+            # (the heartbeat is off in fallback), so the fall-back would be slow.
+            # On first setup/reload there are no overlays yet, so skip it.
+            if reset_zones and ctx.schedule_switch:
+                await self._resume_zone_schedule(ctx)
             self._applied.pop(ctx.subentry_id, None)
             self._set_runtime_stand(ctx, STAND_FALLBACK)
+
+    async def _resume_zone_schedule(self, ctx: ZoneContext) -> None:
+        """Resume a zone onto its Tado schedule via ``switch.<zone>_schedule`` (spec §2.1).
+
+        tado_hijack has no per-zone resume service (``resume_all_schedules`` is too
+        broad), but turning the zone's schedule switch **on** lifts the HA overlay
+        and puts the zone back on the Tado schedule — this works for both tado_hijack
+        and the ``fake_tado`` test harness. Fully defensive: a failing/missing switch
+        is logged and skipped, never propagated, so a flaky switch can never make the
+        fallback entry itself fail (the overlay then simply lapses naturally).
+        """
+        try:
+            await self.hass.services.async_call(
+                SWITCH_DOMAIN,
+                SERVICE_TURN_ON,
+                {ATTR_ENTITY_ID: ctx.schedule_switch},
+                blocking=True,
+            )
+        except Exception as err:  # noqa: BLE001 - must never break fallback entry
+            LOGGER.warning(
+                "Zone %s: directe terugval naar het Tado-schema mislukt "
+                "(switch.turn_on op %s): %s; overlay vervalt vanzelf",
+                ctx.name,
+                ctx.schedule_switch,
+                err,
+            )
 
     async def _enter_off(self, *, write_baseline: bool) -> None:
         """Master mode off: write the off-baseline, set the zones off (spec §2)."""

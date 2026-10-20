@@ -18,7 +18,7 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, State
 
 from custom_components.zone_heating.backend_tado import (
     ATTR_ALL_DAYS,
@@ -56,11 +56,14 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
     async_mock_service,
+    mock_restore_cache,
 )
 
 HOME_SOURCE = "input_boolean.home_source"
 ZONE_SOURCE = "input_boolean.zone_source"
 TARGET = "climate.living"
+# Derived from the first target (climate.living) by the coordinator.
+SWITCH = "switch.living_schedule"
 CLIMATE = "climate.woonkamer"
 MODE = "select.heating_mode"
 
@@ -308,6 +311,66 @@ async def test_fallback_stops_overlays(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
     assert len(mode_calls) == before
     assert hass.states.get(CLIMATE).attributes["zone_state"] == "Fallback"
+
+
+# --- deliberate Fallback resumes the zone directly (spec §2.1) ---------------
+async def test_deliberate_fallback_resumes_zone_schedule(
+    hass: HomeAssistant,
+) -> None:
+    """A deliberate switch into Fallback resumes the zone onto its Tado schedule.
+
+    The per-zone overlay would otherwise only lapse on its next_block termination
+    (the heartbeat is off in fallback), so HA turns ``switch.<zone>_schedule`` on to
+    drop the overlay immediately (spec §2.1).
+    """
+    # The schedule switch must exist for the resume to fire.
+    hass.states.async_set(SWITCH, "off")
+    turn_on_calls = async_mock_service(hass, "switch", "turn_on")
+
+    await _setup(hass)
+    assert not turn_on_calls  # first setup (previous is None) -> no resume
+
+    await _select(hass, "fallback")
+
+    # The deliberate switch resumes the zone onto its Tado schedule.
+    assert len(turn_on_calls) == 1
+    assert turn_on_calls[0].data[ATTR_ENTITY_ID] == SWITCH
+    assert hass.states.get(CLIMATE).attributes["zone_state"] == "Fallback"
+
+
+async def test_deliberate_fallback_from_off_resumes_zone_schedule(
+    hass: HomeAssistant,
+) -> None:
+    """off -> fallback is a deliberate switch too, so it resumes the schedule."""
+    hass.states.async_set(SWITCH, "off")
+    turn_on_calls = async_mock_service(hass, "switch", "turn_on")
+
+    await _setup(hass)
+    await _select(hass, "off")
+    assert not turn_on_calls  # Off does not resume onto the schedule
+
+    await _select(hass, "fallback")
+    assert len(turn_on_calls) == 1
+    assert turn_on_calls[0].data[ATTR_ENTITY_ID] == SWITCH
+
+
+async def test_setup_directly_in_fallback_does_not_resume(
+    hass: HomeAssistant,
+) -> None:
+    """Setup/reload directly in Fallback (previous is None) does NOT resume.
+
+    There are no overlays yet on a cold start, so HA must not fire a schedule
+    resume; only a *deliberate* live switch does (spec §2.1).
+    """
+    hass.states.async_set(SWITCH, "off")
+    # Restore the master mode to fallback so setup starts in it (previous is None).
+    mock_restore_cache(hass, [State(MODE, "fallback")])
+    turn_on_calls = async_mock_service(hass, "switch", "turn_on")
+
+    await _setup(hass)
+
+    assert hass.states.get(MODE).state == "fallback"
+    assert not turn_on_calls  # no resume on a cold start in fallback
 
 
 async def test_fallback_to_auto_reasserts_overlay(hass: HomeAssistant) -> None:
