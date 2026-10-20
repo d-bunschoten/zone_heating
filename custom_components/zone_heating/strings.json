@@ -131,7 +131,7 @@
     "select": {
       "heating_mode": {
         "state": {
-          "auto": "Auto",
+          "auto": "Managed",
           "fallback": "Fallback",
           "off": "Off"
         }
