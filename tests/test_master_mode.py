@@ -235,6 +235,35 @@ async def test_master_off_then_auto_drops_a_manual_stand(
     assert hass.states.get(CLIMATE).state == "auto"
 
 
+async def test_zone_interactions_ignored_while_master_off(
+    hass: HomeAssistant,
+) -> None:
+    """In master Off the per-zone machine is paused: a dial/preset is ignored."""
+    await _setup(hass)
+    await _select(hass, "off")
+    assert hass.states.get(CLIMATE).state == "off"
+
+    # Dialing a temperature must not flip the zone to a stuck "heat at off-temp".
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {ATTR_ENTITY_ID: CLIMATE, ATTR_TEMPERATURE: 26},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(CLIMATE).state == "off"
+
+    # A preset is ignored too.
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode",
+        {ATTR_ENTITY_ID: CLIMATE, "preset_mode": "comfort"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(CLIMATE).state == "off"
+
+
 # --- leaving Off -> auto rewrites the normal baseline (spec §8) --------------
 async def test_leaving_off_to_auto_rewrites_normal_baseline(
     hass: HomeAssistant,

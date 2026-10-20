@@ -651,6 +651,11 @@ class ZoneHeatingCoordinator:
         ms = self.manual.get(sid)
         if ms is None:
             return
+        if self._mode != MODE_AUTO:
+            # The master switch is the top-level control: in Off/Fallback the
+            # per-zone machine is paused (spec §2), so per-zone changes are ignored
+            # (they would not apply and would leave a stale "heat at off-temp").
+            return
         if hvac_mode == HVAC_AUTO:
             self._to_auto_state(sid)
         elif hvac_mode == HVAC_OFF:
@@ -672,6 +677,8 @@ class ZoneHeatingCoordinator:
         ms = self.manual.get(sid)
         if ms is None:
             return
+        if self._mode != MODE_AUTO:
+            return  # master Off/Fallback: per-zone machine paused (spec §2)
         ms.hvac_mode = HVAC_HEAT
         ms.preset = preset
         ms.custom_setpoint = None
@@ -688,6 +695,8 @@ class ZoneHeatingCoordinator:
         ms = self.manual.get(sid)
         if ms is None:
             return
+        if self._mode != MODE_AUTO:
+            return  # master Off/Fallback: per-zone machine paused (spec §2)
         ctx = self.zones.get(sid)
         if ctx is not None and self._read_binary(ctx.window_binary):
             return
