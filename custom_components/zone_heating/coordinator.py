@@ -286,6 +286,10 @@ class ZoneHeatingCoordinator:
         # Dead-man's-switch heartbeat canceller (spec §7); only armed in auto.
         self._heartbeat_cancel: Callable[[], None] | None = None
         self._home_present_entity: str | None = None
+        # Previous home-presence value, to detect the present -> away *edge* (spec
+        # §3): a heat stand ends only when the house *becomes* Away, not on every
+        # evaluation while already away (so a manual override set while away sticks).
+        self._prev_home_present: bool | None = None
         self._boost_duration_entity: str | None = None
         self._override_timeout_entity: str | None = None
         # target entity_id -> list of zone subentry_ids that use it.
@@ -827,8 +831,14 @@ class ZoneHeatingCoordinator:
             # In fallback/off the state machine is paused (spec §2): HA observes
             # (fallback) or holds the zones off (off); no per-zone overlays here.
             return
+        # Detect the present -> away edge once per cycle (spec §3): only on this
+        # edge do non-sticky heat stands end. A new manual override set while the
+        # house is already away is therefore kept.
+        home_present = self._read_binary(self._home_present_entity)
+        became_away = self._prev_home_present is True and not home_present
+        self._prev_home_present = home_present
         for ctx in self.zones.values():
-            await self._async_evaluate_zone(ctx)
+            await self._async_evaluate_zone(ctx, became_away=became_away)
 
     # --- master-mode orchestration (spec §2, §8) ----------------------------
     async def _async_handle_mode_change(self) -> None:
@@ -944,17 +954,21 @@ class ZoneHeatingCoordinator:
                 )
             self._set_runtime_stand(ctx, STAND_OFF)
 
-    async def _async_evaluate_zone(self, ctx: ZoneContext) -> None:
+    async def _async_evaluate_zone(
+        self, ctx: ZoneContext, *, became_away: bool = False
+    ) -> None:
         sid = ctx.subentry_id
         ms = self.manual[sid]
         home_present = self._read_binary(self._home_present_entity)
 
-        # Non-sticky heat stands end when the house becomes Away (spec §3);
-        # the ``away`` preset is sticky and survives it.
+        # Non-sticky heat stands end only when the house *becomes* Away (the
+        # present -> away edge, spec §3); the ``away`` preset is sticky and
+        # survives it. While already away a new manual override/Custom (and off)
+        # is allowed and kept until its respect-window or a manual change.
         if (
-            ms.hvac_mode == HVAC_HEAT
+            became_away
+            and ms.hvac_mode == HVAC_HEAT
             and ms.preset != PRESET_AWAY
-            and not home_present
         ):
             self._to_auto_state(sid)
 

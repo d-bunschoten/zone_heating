@@ -285,6 +285,26 @@ async def test_non_sticky_stand_ends_on_house_away(
     assert state.attributes["zone_state"] == "Away"  # auto now picks Away
 
 
+async def test_override_allowed_while_already_away(hass: HomeAssistant) -> None:
+    """A manual override set while the house is *already* Away sticks (spec §3).
+
+    Only the present -> away *edge* ends a non-sticky heat stand; starting one
+    while already away must not snap straight back to Away.
+    """
+    _, calls = await _setup(hass, home="off", zone="off")  # house already Away
+    assert hass.states.get(CLIMATE).attributes["zone_state"] == "Away"
+
+    await _set_preset(hass, "comfort")
+    state = hass.states.get(CLIMATE)
+    assert state.state == "heat"
+    assert state.attributes["preset_mode"] == "comfort"
+
+    # A later evaluation (e.g. a source change) must not undo it either.
+    hass.states.async_set(ZONE_SOURCE, "on")
+    await hass.async_block_till_done()
+    assert hass.states.get(CLIMATE).state == "heat"
+
+
 # --- off is sticky ----------------------------------------------------------
 async def test_off_turns_zone_off_and_is_sticky(hass: HomeAssistant) -> None:
     _, calls = await _setup(hass, home="on", zone="on")  # Active first
