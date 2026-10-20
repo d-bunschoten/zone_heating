@@ -118,26 +118,31 @@ views:
             title: Woonkamer — instellingen
             show_header_toggle: false
             state_color: true
+            # Per stand gegroepeerd (volgorde away -> standby -> active -> boost):
+            # de temperatuur en, waar van toepassing, het optionele schema samen.
+            # Schedule-helpers zijn OPTIONEEL (alleen als je ze zelf aanmaakt en
+            # aan de zone koppelt); heeft deze zone ze niet, laat die rij dan weg.
             entities:
               - type: section
-                label: Setpoints per stand
+                label: Away
               - entity: number.woonkamer_away_temp
-                name: Away-temp
-              - entity: number.woonkamer_standby_temp
-                name: Standby-temp
-              - entity: number.woonkamer_active_temp
-                name: Active-temp
-              - entity: number.woonkamer_boost_temp
-                name: Boost-temp
-              # Schedule-helpers zijn OPTIONEEL: ze bestaan alleen als je ze zelf
-              # als `schedule`-helper hebt aangemaakt én aan de zone hebt
-              # gekoppeld. Heeft deze zone ze niet, verwijder dan deze sectie.
+                name: Temperatuur
               - type: section
-                label: Schema's (optioneel)
+                label: Standby
+              - entity: number.woonkamer_standby_temp
+                name: Temperatuur
               - entity: schedule.woonkamer_standby_schedule
-                name: Standby-schema
+                name: Schema (optioneel)
+              - type: section
+                label: Active
+              - entity: number.woonkamer_active_temp
+                name: Temperatuur
               - entity: schedule.woonkamer_active_schedule
-                name: Active-schema (poort)
+                name: Schema (optioneel, met poort)
+              - type: section
+                label: Boost
+              - entity: number.woonkamer_boost_temp
+                name: Temperatuur
               - type: section
                 label: Status (alleen-lezen)
               - entity: sensor.woonkamer_control_source
@@ -174,17 +179,25 @@ views:
             title: Keuken — instellingen
             show_header_toggle: false
             state_color: true
+            # Zelfde per-stand-volgorde; deze zone heeft geen schedule-helpers,
+            # dus alleen de temperatuur per stand.
             entities:
               - type: section
-                label: Setpoints per stand
+                label: Away
               - entity: number.keuken_away_temp
-                name: Away-temp
+                name: Temperatuur
+              - type: section
+                label: Standby
               - entity: number.keuken_standby_temp
-                name: Standby-temp
+                name: Temperatuur
+              - type: section
+                label: Active
               - entity: number.keuken_active_temp
-                name: Active-temp
+                name: Temperatuur
+              - type: section
+                label: Boost
               - entity: number.keuken_boost_temp
-                name: Boost-temp
+                name: Temperatuur
               - type: section
                 label: Status (alleen-lezen)
               - entity: sensor.keuken_control_source
