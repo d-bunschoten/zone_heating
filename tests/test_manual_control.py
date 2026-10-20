@@ -38,6 +38,7 @@ from custom_components.zone_heating.const import (
     CONF_PRESENCE_ENTITY,
     CONF_TARGETS,
     DEFAULT_BOOST_TEMP,
+    DEFAULT_OFF_BASELINE_TEMP,
     DOMAIN,
     SUBENTRY_TYPE_ZONE,
 )
@@ -315,6 +316,8 @@ async def test_off_turns_zone_off_and_is_sticky(hass: HomeAssistant) -> None:
     state = hass.states.get(CLIMATE)
     assert state.state == "off"
     assert state.attributes["zone_state"] == "Off"
+    # The dial shows the frost/off-baseline temp while off, not a stale setpoint.
+    assert state.attributes["temperature"] == DEFAULT_OFF_BASELINE_TEMP
 
     # House-Away must not revive it.
     hass.states.async_set(HOME_SOURCE, "off")

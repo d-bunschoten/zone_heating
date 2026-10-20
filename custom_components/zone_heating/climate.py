@@ -45,6 +45,7 @@ from .const import (
     ZONE_PRESET_MODES,
 )
 from .coordinator import ZoneHeatingCoordinator, ZoneRuntimeState
+from .engine.state_machine import STAND_OFF, STAND_WINDOW_OPEN
 from .helpers import iter_zone_subentries, zone_device_info, zone_name
 
 
@@ -179,10 +180,24 @@ class ZoneClimate(ClimateEntity, RestoreEntity):
 
     @property
     def target_temperature(self) -> float | None:
-        """Follow the coordinator's chosen/forced setpoint (spec §3, §4)."""
+        """Follow the coordinator's chosen/forced setpoint (spec §3, §4).
+
+        While the zone is off or window-open the device holds frost protection, so
+        the dial shows the off/frost temp (not a stale last setpoint); it returns to
+        the chosen/auto setpoint as soon as the zone leaves off (spec §4/§8).
+        """
         runtime = self._runtime
         if runtime is not None and runtime.setpoint is not None:
             return runtime.setpoint
+        coord = self._coordinator
+        if (
+            coord is not None
+            and runtime is not None
+            and runtime.zone_state in (STAND_OFF, STAND_WINDOW_OPEN)
+        ):
+            off_temp = coord.zone_off_temp(self._subentry_id)
+            if off_temp is not None:
+                return off_temp
         return self._attr_target_temperature
 
     @property

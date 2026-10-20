@@ -748,6 +748,11 @@ class ZoneHeatingCoordinator:
         ms = self.manual.get(sid)
         return bool(ms and ms.hvac_mode == HVAC_HEAT)
 
+    def zone_off_temp(self, sid: str) -> float | None:
+        """The frost-protection / off-baseline temp the zone holds while off (§8)."""
+        ctx = self.zones.get(sid)
+        return ctx.off_baseline_temp if ctx else None
+
     def zone_override_remaining_min(self, sid: str) -> int | None:
         """Minutes left on the respect-window / boost timer (None if sticky)."""
         ms = self.manual.get(sid)
