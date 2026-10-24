@@ -93,6 +93,7 @@ from .const import (
     MODE_AUTO,
     MODE_FALLBACK,
     MODE_OFF,
+    OVERLAY_NEXT_BLOCK,
     OVERLAY_TIMER,
     OWN_COMMAND_DEBOUNCE_SECONDS,
     PRESENCE_DEBOUNCE_SECONDS,
@@ -109,6 +110,7 @@ from .engine.baseline import (
     BaselinePlan,
     ScheduleBlock as BaselineBlock,
     derive_normal_baseline_week,
+    has_next_block,
     off_baseline,
 )
 from .engine.override import OverrideInputs, detect_custom_change
@@ -284,6 +286,13 @@ class ZoneHeatingCoordinator:
         # reload only rewrites a baseline that actually changed (spec §8 dedupe).
         self._store: Store | None = None
         self._baseline_sigs: dict[str, str] = {}
+        # Per-zone: does the active baseline have a schedule transition ("next
+        # block")? A flat one-block baseline (every off/frost baseline, and any
+        # standby schedule with no on-blocks) has none, so a NEXT_TIME_BLOCK overlay
+        # termination would be rejected by Tado (HTTP 422) — such a zone gets a timer
+        # termination instead (spec §7). Set on every baseline write; missing is
+        # treated as flat (timer is valid everywhere, NEXT_TIME_BLOCK is not).
+        self._baseline_has_next: dict[str, bool] = {}
         # target / switch entity_id -> zone subentry_ids that use it.
         self._switch_to_zone: dict[str, list[str]] = {}
         self._mode_entity: str | None = None
@@ -1008,7 +1017,6 @@ class ZoneHeatingCoordinator:
 
     async def _enter_off(self, *, write_baseline: bool) -> None:
         """Master mode off: write the off-baseline, set the zones off (spec §2)."""
-        termination = self._overlay_termination()
         for ctx in self.zones.values():
             sid = ctx.subentry_id
             # The master switch is the top-level control: Off puts the zone in off
@@ -1023,6 +1031,9 @@ class ZoneHeatingCoordinator:
                 await self._async_write_off_baseline(ctx)
             ok = True
             if ctx.targets:
+                # The off baseline is a flat frost block, so this resolves to a timer
+                # termination (NEXT_TIME_BLOCK would 422 on it); spec §7.
+                termination = self._overlay_termination(ctx)
                 # Resilient like the auto path (F5.2 §A): a failed set_off at
                 # master=off is logged + skipped, never propagated, so Off still
                 # loads. On failure leave the applied-cache untouched so a later
@@ -1120,7 +1131,7 @@ class ZoneHeatingCoordinator:
             return
         if self._applied.get(sid) == want:
             return
-        termination = self._overlay_termination()
+        termination = self._overlay_termination(ctx)
         if decision.off:
             ok = await self._safe_backend_write(
                 self.backend.set_off(ctx.targets, termination),
@@ -1252,13 +1263,13 @@ class ZoneHeatingCoordinator:
         termination window (spec §7). Bypasses the redundancy guard on purpose."""
         if self._mode != MODE_AUTO:
             return
-        termination = self._overlay_termination()
         now = dt_util.utcnow()
         for ctx in self.zones.values():
             applied = self._applied.get(ctx.subentry_id)
             if applied is None or applied.off or applied.setpoint is None:
                 continue
             if ctx.targets:
+                termination = self._overlay_termination(ctx)
                 # A failed heartbeat (e.g. tado_hijack down) is logged + skipped,
                 # not raised as a loose exception (spec §7/§8 resilience). The
                 # dead-man's-switch still protects: a crashed HA lets the overlay
@@ -1284,11 +1295,28 @@ class ZoneHeatingCoordinator:
             )
         )
 
-    def _overlay_termination(self) -> OverlayTermination:
-        """The configured overlay termination (spec §7)."""
+    def _overlay_termination(
+        self, ctx: ZoneContext | None = None
+    ) -> OverlayTermination:
+        """The overlay termination for a zone's write (spec §7).
+
+        Honours the configured mode, but **falls back to a timer when the zone's
+        active baseline is a single flat block**: Tado rejects a ``NEXT_TIME_BLOCK``
+        overlay on a zone with no "next schedule block" (HTTP 422), which every
+        off/frost baseline and any flat standby baseline is. The timer duration is
+        the configured ``overlay_timer_duration`` either way. A zone whose baseline
+        shape is not yet known is treated as flat (the timer is valid everywhere,
+        ``NEXT_TIME_BLOCK`` is not).
+        """
         mode = self.entry.options.get(
             CONF_OVERLAY_TERMINATION, DEFAULT_OVERLAY_TERMINATION
         )
+        if (
+            mode == OVERLAY_NEXT_BLOCK
+            and ctx is not None
+            and not self._baseline_has_next.get(ctx.subentry_id, False)
+        ):
+            mode = OVERLAY_TIMER
         if mode == OVERLAY_TIMER:
             duration = self.entry.options.get(
                 CONF_OVERLAY_TIMER_DURATION, DEFAULT_OVERLAY_TIMER_DURATION
@@ -1359,6 +1387,9 @@ class ZoneHeatingCoordinator:
         if not ctx.targets:
             return
         sid = ctx.subentry_id
+        # Record the active baseline's shape even when the write is deduped below:
+        # the overlay termination depends on it (spec §7).
+        self._baseline_has_next[sid] = has_next_block(plan)
         signature = self._baseline_signature(plan)
         if self._baseline_sigs.get(sid) == signature:
             LOGGER.debug(

@@ -29,7 +29,6 @@ from custom_components.zone_heating.backend_tado import (
     ATTR_OVERLAY,
     ATTR_TIMETABLE,
     TADO_DOMAIN,
-    TADO_OVERLAY_NEXT_BLOCK,
     TADO_SERVICE_SET_MODE,
     TADO_SERVICE_SET_SCHEDULE,
 )
@@ -46,7 +45,9 @@ from custom_components.zone_heating.const import (
     CONF_OVERLAY_TIMER_DURATION,
     CONF_PRESENCE_ENTITY,
     CONF_TARGETS,
+    DEFAULT_OVERLAY_TIMER_DURATION,
     DOMAIN,
+    OVERLAY_NEXT_BLOCK,
     OVERLAY_TIMER,
     SUBENTRY_TYPE_ZONE,
 )
@@ -149,12 +150,21 @@ async def test_first_setup_writes_normal_baseline(hass: HomeAssistant) -> None:
 
 
 # --- set_mode carries the configured overlay termination (spec §7) -----------
-async def test_set_mode_carries_next_block_termination(
+async def test_flat_baseline_next_block_config_falls_back_to_timer(
     hass: HomeAssistant,
 ) -> None:
-    mode_calls, _ = await _setup(hass)
-    assert mode_calls[-1].data[ATTR_OVERLAY] == TADO_OVERLAY_NEXT_BLOCK
-    assert ATTR_DURATION not in mode_calls[-1].data
+    """A flat (one-block) baseline forces a timer even when next_block is configured.
+
+    This zone has no standby schedule, so its baseline is a single flat ONE_DAY
+    block. Tado rejects a NEXT_TIME_BLOCK overlay on such a zone (HTTP 422
+    ``unsupportedOverlayTerminationType`` — "zone does not have next schedule
+    block"), so the coordinator falls back to a timer termination (spec §7).
+    """
+    mode_calls, _ = await _setup(
+        hass, options={CONF_OVERLAY_TERMINATION: OVERLAY_NEXT_BLOCK}
+    )
+    assert mode_calls[-1].data[ATTR_DURATION] == DEFAULT_OVERLAY_TIMER_DURATION
+    assert ATTR_OVERLAY not in mode_calls[-1].data
 
 
 async def test_set_mode_carries_timer_termination(hass: HomeAssistant) -> None:

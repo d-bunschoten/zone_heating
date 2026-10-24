@@ -32,9 +32,12 @@ from custom_components.zone_heating.backend_tado import (
     ATTR_ALL_DAYS,
     ATTR_BLOCKS,
     ATTR_DAYS,
+    ATTR_DURATION,
     ATTR_HVAC_MODE,
+    ATTR_OVERLAY,
     ATTR_TIMETABLE,
     TADO_DOMAIN,
+    TADO_OVERLAY_NEXT_BLOCK,
     TADO_SERVICE_SET_MODE,
     TADO_SERVICE_SET_SCHEDULE,
 )
@@ -490,6 +493,35 @@ async def test_per_day_schedule_writes_seven_day_grouped(
     assert {"start": "09:00", "end": "11:00", "temperature": 20.0} in weekend_call.data[
         ATTR_BLOCKS
     ]
+
+
+async def test_next_block_termination_with_multiblock_baseline(
+    hass: HomeAssistant,
+) -> None:
+    """A baseline with a schedule transition keeps the NEXT_TIME_BLOCK termination.
+
+    The counterpart to the flat-baseline timer fallback: with a standby schedule
+    that produces more than one block, the zone *does* have a next schedule block,
+    so the configured ``next_block`` termination is used as-is (no 422; spec §7).
+    """
+    # A single on-block makes a uniform one_day baseline with 3 blocks (base/on/base).
+    uniform = [_entry("06:00:00", "08:00:00", 21.0)]
+    week = {day: uniform for day in (
+        "monday", "tuesday", "wednesday", "thursday",
+        "friday", "saturday", "sunday",
+    )}
+    _register_weekly_schedule(hass, week)
+
+    _, mode_calls, _ = await _setup(
+        hass,
+        home="on",
+        zone="off",
+        subentry_extra={CONF_STANDBY_SCHEDULE: STANDBY_SCHEDULE},
+    )
+
+    # Default config is next_block; the multi-block baseline supports it.
+    assert mode_calls[-1].data[ATTR_OVERLAY] == TADO_OVERLAY_NEXT_BLOCK
+    assert ATTR_DURATION not in mode_calls[-1].data
 
 
 # --- Fallback shows the baseline/standby temp, not a stale value (spec §2.1) --

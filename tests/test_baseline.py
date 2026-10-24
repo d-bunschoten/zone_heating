@@ -16,6 +16,7 @@ from custom_components.zone_heating.engine.baseline import (
     derive_daily_blocks,
     derive_normal_baseline,
     derive_normal_baseline_week,
+    has_next_block,
     off_baseline,
 )
 
@@ -127,6 +128,38 @@ def test_off_baseline_is_flat_frost_temp() -> None:
     assert plan.writes[0].blocks == (
         {"start": "00:00", "end": "24:00", "temperature": 7.0},
     )
+
+
+# --- has_next_block: picks the overlay termination (spec §7) -----------------
+def test_flat_baseline_has_no_next_block() -> None:
+    """A one-block ONE_DAY baseline (no on-blocks) has no next schedule block."""
+    week = {day: [] for day in _WEEKDAYS}
+    plan = derive_normal_baseline_week(week, BASE, _WEEKDAYS)
+    assert len(plan.writes) == 1 and len(plan.writes[0].blocks) == 1
+    assert has_next_block(plan) is False
+
+
+def test_off_baseline_has_no_next_block() -> None:
+    """Every off/frost baseline is a single flat block -> no next block."""
+    assert has_next_block(off_baseline(7.0)) is False
+
+
+def test_multiblock_one_day_baseline_has_next_block() -> None:
+    """A uniform week with an on-block -> one_day with >1 block -> has a next block."""
+    week = {day: [_b("06:00", "08:00", 21.0)] for day in _WEEKDAYS}
+    plan = derive_normal_baseline_week(week, BASE, _WEEKDAYS)
+    assert plan.timetable == TIMETABLE_ONE_DAY and len(plan.writes[0].blocks) > 1
+    assert has_next_block(plan) is True
+
+
+def test_seven_day_baseline_has_next_block() -> None:
+    """A per-weekday split (seven_day, >1 write) has day-boundary transitions."""
+    week = {day: [_b("06:00", "08:00", 21.0)] for day in _WEEKDAYS}
+    week["saturday"] = [_b("09:00", "11:00", 20.0)]
+    week["sunday"] = [_b("09:00", "11:00", 20.0)]
+    plan = derive_normal_baseline_week(week, BASE, _WEEKDAYS)
+    assert plan.timetable == TIMETABLE_SEVEN_DAY and len(plan.writes) >= 2
+    assert has_next_block(plan) is True
 
 
 # --- full-week plan (natural schedule shape, spec §8) ------------------------

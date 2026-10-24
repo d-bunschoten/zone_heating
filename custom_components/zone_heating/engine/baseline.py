@@ -223,3 +223,21 @@ def off_baseline(off_temp: float) -> BaselinePlan:
         timetable=TIMETABLE_ONE_DAY,
         writes=(BaselineWrite(all_days=True, weekdays=(), blocks=blocks),),
     )
+
+
+def has_next_block(plan: BaselinePlan) -> bool:
+    """Whether the baseline contains a schedule transition (a "next block").
+
+    Tado rejects a ``NEXT_TIME_BLOCK`` overlay termination on a zone whose active
+    timetable is a single flat block — it has no "next schedule block" and returns
+    HTTP 422 ``unsupportedOverlayTerminationType`` (observed live on a flat ONE_DAY
+    baseline). A plan has a next block when any single day carries two or more
+    blocks, or when the week splits into two or more day-patterns (a ``seven_day``
+    plan, whose day boundaries are themselves transitions). A flat ONE_DAY plan with
+    one block — which every :func:`off_baseline`, and any standby schedule with no
+    on-blocks, produces — has none. The coordinator uses this to pick a timer
+    termination for such zones instead (spec §7/§8).
+    """
+    if len(plan.writes) >= 2:
+        return True
+    return any(len(write.blocks) >= 2 for write in plan.writes)
