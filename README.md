@@ -113,9 +113,10 @@ Copy `custom_components/zone_heating/` into your Home Assistant
 - Home Assistant 2026.10.0 or newer.
 - The **`tado_hijack`** HACS integration, set up for your Tado account. Zone
   Heating drives Tado through it — its `set_mode` / `set_schedule` services and the
-  per-zone schedule switch. (It is not declared as a Home Assistant manifest
-  dependency so the integration still loads if Tado is briefly unavailable; set up
-  `tado_hijack` first for things to actually work.)
+  per-zone schedule switch. It is declared only as a soft `after_dependencies`, so
+  Home Assistant sets `tado_hijack` up first when it is present (its services are
+  ready before Zone Heating writes), while Zone Heating still loads if `tado_hijack`
+  is absent or briefly unavailable — set it up first for things to actually work.
 
 ## Configuration
 
