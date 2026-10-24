@@ -33,3 +33,7 @@ config/
 .idea/
 .vscode/
 .DS_Store
+
+# Design & spec documents live in the private workspace, not in this public repo
+verwarming-*.md
+/docs/
