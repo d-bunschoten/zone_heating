@@ -52,12 +52,16 @@ class ScheduleState:
     """Current state of a referenced ``schedule`` helper.
 
     ``block_temp`` is the temperature of the on-block that is active *now*, or
-    ``None`` when there is no on-block right now (a gap in the schedule). A zone
-    that has *no* schedule configured is represented by passing ``None`` in place
+    ``None`` when the current on-block carries no temperature **or** there is no
+    on-block right now. ``on_block`` disambiguates those two: ``True`` means the
+    schedule is in an on-block now (a gating-only schedule carries no temperature,
+    so ``on_block`` True with ``block_temp`` None is normal), ``False`` means a gap.
+    A zone with *no* schedule configured is represented by passing ``None`` in place
     of a ``ScheduleState`` on :class:`AutoInputs`.
     """
 
     block_temp: float | None
+    on_block: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,8 +114,9 @@ def _active_allowed(inp: AutoInputs) -> tuple[bool, float | None]:
 
     - No ``active_schedule`` configured -> the gate is lifted: Active is allowed
       whenever present, at the ``active_temp`` base.
-    - ``active_schedule`` configured, on-block now -> Active allowed at that
-      block's temperature.
+    - ``active_schedule`` configured, on-block now -> Active allowed, at that
+      block's temperature if it carries one, else the ``active_temp`` base (a
+      gating-only schedule carries no temperature; it still permits Active).
     - ``active_schedule`` configured, gap now:
       - ``active_gate`` True (default) -> the time-gate holds: not allowed.
       - ``active_gate`` False -> gate lifted: allowed on the ``active_temp`` base
@@ -122,6 +127,10 @@ def _active_allowed(inp: AutoInputs) -> tuple[bool, float | None]:
         return True, inp.active_temp
     if sched.block_temp is not None:
         return True, sched.block_temp
+    if sched.on_block:
+        # On-block without its own temperature (a gating-only schedule): Active is
+        # permitted, at the base active_temp.
+        return True, inp.active_temp
     if inp.active_gate:
         return False, None
     return True, inp.active_temp

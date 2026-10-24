@@ -1680,5 +1680,7 @@ class ZoneHeatingCoordinator:
                 block = float(raw) if raw is not None else None
             except (TypeError, ValueError):
                 block = None
-            return ScheduleState(block_temp=block)
-        return ScheduleState(block_temp=None)
+            # In an on-block now (on_block=True) even when it carries no
+            # temperature — a gating-only schedule still permits Active (spec §3).
+            return ScheduleState(block_temp=block, on_block=True)
+        return ScheduleState(block_temp=None, on_block=False)

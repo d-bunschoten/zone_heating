@@ -87,6 +87,16 @@ CASES = [
         PRESET_STANDBY,
     ),
     (
+        "present, gating-only active on-block (no temp), gate on -> Active at base",
+        _inp(
+            present=True,
+            active_schedule=ScheduleState(block_temp=None, on_block=True),
+        ),
+        STAND_ACTIVE,
+        ACTIVE,
+        PRESET_ACTIVE,
+    ),
+    (
         "present, active schedule gap, gate OFF -> Active at active_temp base",
         _inp(
             present=True,
