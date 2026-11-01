@@ -76,6 +76,32 @@ CASES = [
         False,
         None,
     ),
+    (
+        "reported == baseline while switch state lags -> lapse, not Custom",
+        _inp(
+            reported_setpoint=16.0,
+            is_expected_schedule_fallback=False,
+            expected_schedule_setpoint=16.0,
+        ),
+        False,
+        None,
+    ),
+    (
+        "reported != baseline -> genuine Custom (baseline guard does not fire)",
+        _inp(
+            reported_setpoint=21.0,
+            is_expected_schedule_fallback=False,
+            expected_schedule_setpoint=16.0,
+        ),
+        True,
+        21.0,
+    ),
+    (
+        "reported ~ baseline within tolerance -> lapse, not Custom",
+        _inp(reported_setpoint=16.02, expected_schedule_setpoint=16.0),
+        False,
+        None,
+    ),
 ]
 
 

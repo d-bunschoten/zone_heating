@@ -29,6 +29,7 @@ from custom_components.zone_heating.backend_tado import (
     ATTR_OVERLAY,
     ATTR_TIMETABLE,
     TADO_DOMAIN,
+    TADO_OVERLAY_NEXT_BLOCK,
     TADO_SERVICE_SET_MODE,
     TADO_SERVICE_SET_SCHEDULE,
 )
@@ -45,7 +46,6 @@ from custom_components.zone_heating.const import (
     CONF_OVERLAY_TIMER_DURATION,
     CONF_PRESENCE_ENTITY,
     CONF_TARGETS,
-    DEFAULT_OVERLAY_TIMER_DURATION,
     DOMAIN,
     OVERLAY_NEXT_BLOCK,
     OVERLAY_TIMER,
@@ -142,29 +142,31 @@ async def test_first_setup_writes_normal_baseline(hass: HomeAssistant) -> None:
     assert call.data[ATTR_ALL_DAYS] is True
     # one_day plan -> no per-weekday ``days`` field (new backend signature, spec §8).
     assert ATTR_DAYS not in call.data
+    # Flat standby is split at the night boundary so NEXT_TIME_BLOCK stays valid.
     assert call.data[ATTR_BLOCKS] == [
-        {"start": "00:00", "end": "24:00", "temperature": STANDBY_TEMP}
+        {"start": "00:00", "end": "03:00", "temperature": STANDBY_TEMP},
+        {"start": "03:00", "end": "24:00", "temperature": STANDBY_TEMP},
     ]
     # And the state machine asserted the Standby overlay.
     assert mode_calls[-1].data[ATTR_TEMPERATURE] == STANDBY_TEMP
 
 
 # --- set_mode carries the configured overlay termination (spec §7) -----------
-async def test_flat_baseline_next_block_config_falls_back_to_timer(
+async def test_flat_baseline_uses_next_block_after_split(
     hass: HomeAssistant,
 ) -> None:
-    """A flat (one-block) baseline forces a timer even when next_block is configured.
+    """A flat-standby zone now carries NEXT_TIME_BLOCK, not a timer.
 
-    This zone has no standby schedule, so its baseline is a single flat ONE_DAY
-    block. Tado rejects a NEXT_TIME_BLOCK overlay on such a zone (HTTP 422
-    ``unsupportedOverlayTerminationType`` — "zone does not have next schedule
-    block"), so the coordinator falls back to a timer termination (spec §7).
+    The zone has no standby schedule, so its baseline is flat — but it is now split
+    at the night boundary into two identical blocks, so a NEXT_TIME_BLOCK overlay is
+    valid and used (no silently-expiring timer). This is the regression guard for
+    the live-Tado overlay-expiry bug (spec §7).
     """
     mode_calls, _ = await _setup(
         hass, options={CONF_OVERLAY_TERMINATION: OVERLAY_NEXT_BLOCK}
     )
-    assert mode_calls[-1].data[ATTR_DURATION] == DEFAULT_OVERLAY_TIMER_DURATION
-    assert ATTR_OVERLAY not in mode_calls[-1].data
+    assert mode_calls[-1].data[ATTR_OVERLAY] == TADO_OVERLAY_NEXT_BLOCK
+    assert ATTR_DURATION not in mode_calls[-1].data
 
 
 async def test_set_mode_carries_timer_termination(hass: HomeAssistant) -> None:
@@ -188,10 +190,11 @@ async def test_entering_off_writes_off_baseline_and_sets_off(
 
     await _select(hass, "off")
 
-    # Off-baseline written (flat frost temp) ...
+    # Off-baseline written (flat frost temp, split at the night boundary) ...
     assert len(sched_calls) == 2
     assert sched_calls[-1].data[ATTR_BLOCKS] == [
-        {"start": "00:00", "end": "24:00", "temperature": OFF_TEMP}
+        {"start": "00:00", "end": "03:00", "temperature": OFF_TEMP},
+        {"start": "03:00", "end": "24:00", "temperature": OFF_TEMP},
     ]
     # ... and the zone was turned off.
     assert mode_calls[-1].data[ATTR_HVAC_MODE] == "off"
@@ -291,7 +294,8 @@ async def test_leaving_off_to_auto_rewrites_normal_baseline(
     # Leaving Off writes the derived normal baseline back (spec §8.2).
     assert len(sched_calls) == n_after_off + 1
     assert sched_calls[-1].data[ATTR_BLOCKS] == [
-        {"start": "00:00", "end": "24:00", "temperature": STANDBY_TEMP}
+        {"start": "00:00", "end": "03:00", "temperature": STANDBY_TEMP},
+        {"start": "03:00", "end": "24:00", "temperature": STANDBY_TEMP},
     ]
 
 
@@ -411,6 +415,28 @@ async def test_heartbeat_reasserts_overlay(
     assert len(mode_calls) > n_setup
     assert mode_calls[-1].data[ATTR_TEMPERATURE] == STANDBY_TEMP
     assert mode_calls[-1].data[ATTR_HVAC_MODE] == "heat"
+
+
+async def test_heartbeat_skips_when_device_already_matches(
+    hass: HomeAssistant, freezer
+) -> None:
+    """The heartbeat does not re-assert when the device already holds the setpoint.
+
+    With NEXT_TIME_BLOCK overlays nothing needs periodic refreshing, so a matching
+    device means re-asserting would be a suppressed no-op (the flip-flop churn). The
+    guard skips it; a re-assert only happens when the device has actually drifted.
+    """
+    mode_calls, _ = await _setup(hass)  # Standby overlay at STANDBY_TEMP
+    # Mirror the device as already holding the asserted Standby setpoint.
+    hass.states.async_set(TARGET, "heat", {"temperature": STANDBY_TEMP})
+    await hass.async_block_till_done()
+    n_before = len(mode_calls)
+
+    freezer.tick(timedelta(minutes=11))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert len(mode_calls) == n_before  # device matched -> no churny re-assert
 
 
 async def test_no_heartbeat_when_dead_mans_switch_off(

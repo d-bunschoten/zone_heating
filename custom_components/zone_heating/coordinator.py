@@ -1269,6 +1269,15 @@ class ZoneHeatingCoordinator:
             if applied is None or applied.off or applied.setpoint is None:
                 continue
             if ctx.targets:
+                # Skip the re-assert when the device already holds the desired
+                # setpoint. With NEXT_TIME_BLOCK overlays nothing needs periodic
+                # refreshing, so a matching device means re-asserting would be a
+                # no-op that tado_hijack suppresses anyway — the churn that made
+                # ``control_source`` flap every heartbeat. Re-assert only when the
+                # device has actually drifted (e.g. an overlay lapsed at a block
+                # boundary while the zone should still hold a stand); spec §7.
+                if self._device_matches(ctx, applied):
+                    continue
                 termination = self._overlay_termination(ctx)
                 # A failed heartbeat (e.g. tado_hijack down) is logged + skipped,
                 # not raised as a loose exception (spec §7/§8 resilience). The
@@ -1482,6 +1491,12 @@ class ZoneHeatingCoordinator:
         expected_fallback = (
             ctx is not None and self._schedule_switch_state(ctx) == STATE_ON
         )
+        # The switch state can lag an overlay expiry by tens of seconds; also treat
+        # a report that equals the zone's current baseline/schedule setpoint as a
+        # lapse (spec §5), so the race can't latch a false Custom.
+        expected_setpoint = (
+            self._expected_baseline_setpoint(ctx) if ctx is not None else None
+        )
         decision = detect_custom_change(
             OverrideInputs(
                 reported_setpoint=reported,
@@ -1489,6 +1504,7 @@ class ZoneHeatingCoordinator:
                 ha_just_commanded=ha_just,
                 presence_change_recent=presence_recent,
                 is_expected_schedule_fallback=expected_fallback,
+                expected_schedule_setpoint=expected_setpoint,
             )
         )
         # The switch may just have flipped to on (overlay expiry): keep the live
@@ -1511,6 +1527,19 @@ class ZoneHeatingCoordinator:
         self._start_stand_timer(sid)
         await self.async_refresh()
         self._notify(sid)
+
+    def _expected_baseline_setpoint(self, ctx: ZoneContext) -> float | None:
+        """The Standby baseline setpoint the zone holds now (spec §5, §8).
+
+        This is what the zone falls back to when an HA overlay lapses onto the Tado
+        schedule: the standby schedule's current on-block temperature, else the
+        ``standby_temp`` base. Used to recognise an overlay-expiry revert and avoid
+        latching it as a false Custom.
+        """
+        sched = self._read_schedule(ctx.standby_schedule)
+        if sched is not None and sched.block_temp is not None:
+            return sched.block_temp
+        return self._read_number(ctx.standby_number)
 
     # --- control_source / in_fallback (spec §5, §9) -------------------------
     def _schedule_switch_state(self, ctx: ZoneContext) -> str | None:

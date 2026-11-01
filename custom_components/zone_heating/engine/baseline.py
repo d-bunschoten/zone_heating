@@ -45,6 +45,15 @@ TIMETABLE_SEVEN_DAY = "seven_day"
 
 _MINUTES_PER_DAY = 1440
 
+# A single full-day block has no "next schedule block", so Tado rejects a
+# NEXT_TIME_BLOCK overlay on it (HTTP 422). We therefore split any flat full-day
+# curve into two identical blocks at a deep-night boundary: functionally identical
+# heating, but it gives the timetable a transition so NEXT_TIME_BLOCK stays valid
+# and overlays never need a (silently-expiring) timer termination (spec §7/§8).
+# The boundary sits in the deep night so a zone that lapses onto it there is
+# normally in Standby already (no visible change).
+_FLAT_SPLIT_MINUTE = 3 * 60  # 03:00
+
 
 @dataclass(frozen=True)
 class ScheduleBlock:
@@ -112,6 +121,22 @@ def _span(start: int, end: int, temperature: float) -> dict[str, object]:
     return {"start": _fmt(start), "end": _fmt(end), "temperature": float(temperature)}
 
 
+def _ensure_transition(blocks: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Guarantee a timetable transition (a "next block") for NEXT_TIME_BLOCK.
+
+    A single block spanning the whole day has no next block; split it into two
+    identical blocks at :data:`_FLAT_SPLIT_MINUTE`. Anything with >= 2 blocks (a
+    real transition) is returned unchanged.
+    """
+    if len(blocks) != 1:
+        return blocks
+    temperature = blocks[0]["temperature"]
+    return [
+        _span(0, _FLAT_SPLIT_MINUTE, temperature),  # type: ignore[arg-type]
+        _span(_FLAT_SPLIT_MINUTE, _MINUTES_PER_DAY, temperature),  # type: ignore[arg-type]
+    ]
+
+
 def derive_daily_blocks(
     blocks: Iterable[ScheduleBlock], base_temp: float
 ) -> list[dict[str, object]]:
@@ -151,7 +176,7 @@ def derive_daily_blocks(
         result.append(_span(cursor, _MINUTES_PER_DAY, base_temp))
     if not result:
         result.append(_span(0, _MINUTES_PER_DAY, base_temp))
-    return result
+    return _ensure_transition(result)
 
 
 def _blocks_key(blocks: Sequence[dict[str, object]]) -> tuple:
@@ -217,8 +242,12 @@ def derive_normal_baseline_week(
 
 
 def off_baseline(off_temp: float) -> BaselinePlan:
-    """Build the flat off/frost-protection baseline plan (one_day, 1 write; spec §8)."""
-    blocks = (_span(0, _MINUTES_PER_DAY, off_temp),)
+    """Build the off/frost-protection baseline plan (one_day, 1 write; spec §8).
+
+    Split at the night boundary so even this flat curve keeps a transition and a
+    NEXT_TIME_BLOCK overlay stays valid on it (spec §7).
+    """
+    blocks = tuple(_ensure_transition([_span(0, _MINUTES_PER_DAY, off_temp)]))
     return BaselinePlan(
         timetable=TIMETABLE_ONE_DAY,
         writes=(BaselineWrite(all_days=True, weekdays=(), blocks=blocks),),

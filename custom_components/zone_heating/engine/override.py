@@ -38,6 +38,12 @@ class OverrideInputs:
       to the Tado schedule (spec §5 step 3). The coordinator computes it from
       ``switch.<zone>_schedule`` being ``on`` (F5); when so, the underlying change is
       the schedule, never a manual Custom.
+    - ``expected_schedule_setpoint``: the setpoint the zone's baseline/schedule
+      holds *right now* (what it falls back to when an overlay lapses). The
+      ``switch.<zone>_schedule`` state can lag the setpoint change by tens of
+      seconds when an overlay expires, which would slip a lapse through
+      ``is_expected_schedule_fallback`` and latch a false Custom; a reported value
+      equal to this baseline is a lapse, not a knob turn (spec §5).
     """
 
     reported_setpoint: float | None
@@ -45,6 +51,7 @@ class OverrideInputs:
     ha_just_commanded: bool
     presence_change_recent: bool
     is_expected_schedule_fallback: bool = False
+    expected_schedule_setpoint: float | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,9 @@ def detect_custom_change(
       2. an HA-initiated presence switch just happened (presence debounce) ->
          ignore;
       3. an expected schedule fallback (overlay expiry) -> not Custom (F3: never);
+      3b. the reported value equals the zone's current baseline/schedule setpoint ->
+         a lapse onto the schedule, not a knob turn (closes the switch-state lag
+         race, spec §5);
       4. otherwise -> **Custom**, holding the reported value.
     """
     reported = inp.reported_setpoint
@@ -90,6 +100,12 @@ def detect_custom_change(
         return OverrideDecision(is_manual_custom=False, custom_setpoint=None)
 
     if inp.is_expected_schedule_fallback:
+        return OverrideDecision(is_manual_custom=False, custom_setpoint=None)
+
+    if (
+        inp.expected_schedule_setpoint is not None
+        and abs(reported - inp.expected_schedule_setpoint) <= tolerance
+    ):
         return OverrideDecision(is_manual_custom=False, custom_setpoint=None)
 
     return OverrideDecision(is_manual_custom=True, custom_setpoint=reported)

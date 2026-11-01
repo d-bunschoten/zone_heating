@@ -12,6 +12,8 @@ from __future__ import annotations
 from custom_components.zone_heating.engine.baseline import (
     TIMETABLE_ONE_DAY,
     TIMETABLE_SEVEN_DAY,
+    BaselinePlan,
+    BaselineWrite,
     ScheduleBlock,
     derive_daily_blocks,
     derive_normal_baseline,
@@ -37,17 +39,21 @@ def _b(start: str, end: str, temp: float | None) -> ScheduleBlock:
     return ScheduleBlock(start=start, end=end, temperature=temp)
 
 
-# --- empty schedule -> flat base --------------------------------------------
+# --- empty schedule -> flat base (split at the night boundary) ---------------
+# A flat full day is split at 03:00 into two identical blocks so a NEXT_TIME_BLOCK
+# overlay stays valid on it; the heating curve is unchanged.
 def test_empty_schedule_is_flat_base() -> None:
     assert derive_daily_blocks([], BASE) == [
-        {"start": "00:00", "end": "24:00", "temperature": BASE}
+        {"start": "00:00", "end": "03:00", "temperature": BASE},
+        {"start": "03:00", "end": "24:00", "temperature": BASE},
     ]
 
 
 def test_blocks_without_temperature_are_gaps() -> None:
     """An on-block with no temperature is treated as a base-filled gap."""
     assert derive_daily_blocks([_b("06:00", "08:00", None)], BASE) == [
-        {"start": "00:00", "end": "24:00", "temperature": BASE}
+        {"start": "00:00", "end": "03:00", "temperature": BASE},
+        {"start": "03:00", "end": "24:00", "temperature": BASE},
     ]
 
 
@@ -100,9 +106,13 @@ def test_unsorted_input_is_ordered() -> None:
     assert starts == ["00:00", "06:00", "08:00", "17:00", "19:00"]
 
 
-def test_full_day_block_has_no_base_fill() -> None:
+def test_full_day_block_is_split_at_night_boundary() -> None:
+    """A full-day on-block has no base fill, but is split so it keeps a transition."""
     result = derive_daily_blocks([_b("00:00", "24:00", 20.0)], BASE)
-    assert result == [{"start": "00:00", "end": "24:00", "temperature": 20.0}]
+    assert result == [
+        {"start": "00:00", "end": "03:00", "temperature": 20.0},
+        {"start": "03:00", "end": "24:00", "temperature": 20.0},
+    ]
 
 
 # --- single-day wrapper (one_day plan) ---------------------------------------
@@ -120,28 +130,45 @@ def test_derive_normal_baseline_wraps_one_day() -> None:
     )
 
 
-def test_off_baseline_is_flat_frost_temp() -> None:
+def test_off_baseline_is_flat_frost_temp_split() -> None:
+    """The off/frost baseline is flat but split at the night boundary (spec §7)."""
     plan = off_baseline(7.0)
     assert plan.timetable == TIMETABLE_ONE_DAY
     assert len(plan.writes) == 1
     assert plan.writes[0].all_days is True
     assert plan.writes[0].blocks == (
-        {"start": "00:00", "end": "24:00", "temperature": 7.0},
+        {"start": "00:00", "end": "03:00", "temperature": 7.0},
+        {"start": "03:00", "end": "24:00", "temperature": 7.0},
     )
 
 
 # --- has_next_block: picks the overlay termination (spec §7) -----------------
-def test_flat_baseline_has_no_next_block() -> None:
-    """A one-block ONE_DAY baseline (no on-blocks) has no next schedule block."""
+def test_flat_derivation_now_has_next_block() -> None:
+    """A flat week is split at the night boundary, so it HAS a next block now."""
     week = {day: [] for day in _WEEKDAYS}
     plan = derive_normal_baseline_week(week, BASE, _WEEKDAYS)
-    assert len(plan.writes) == 1 and len(plan.writes[0].blocks) == 1
+    assert len(plan.writes[0].blocks) == 2
+    assert has_next_block(plan) is True
+
+
+def test_off_baseline_has_next_block() -> None:
+    """The split off/frost baseline also has a next block (NEXT_TIME_BLOCK valid)."""
+    assert has_next_block(off_baseline(7.0)) is True
+
+
+def test_single_block_plan_has_no_next_block() -> None:
+    """has_next_block still reports False for a genuine one-block plan (safety net)."""
+    plan = BaselinePlan(
+        timetable=TIMETABLE_ONE_DAY,
+        writes=(
+            BaselineWrite(
+                all_days=True,
+                weekdays=(),
+                blocks=({"start": "00:00", "end": "24:00", "temperature": 15.0},),
+            ),
+        ),
+    )
     assert has_next_block(plan) is False
-
-
-def test_off_baseline_has_no_next_block() -> None:
-    """Every off/frost baseline is a single flat block -> no next block."""
-    assert has_next_block(off_baseline(7.0)) is False
 
 
 def test_multiblock_one_day_baseline_has_next_block() -> None:
@@ -187,7 +214,8 @@ def test_no_schedule_is_flat_base_one_day() -> None:
     assert len(plan.writes) == 1
     assert plan.writes[0].all_days is True
     assert plan.writes[0].blocks == (
-        {"start": "00:00", "end": "24:00", "temperature": BASE},
+        {"start": "00:00", "end": "03:00", "temperature": BASE},
+        {"start": "03:00", "end": "24:00", "temperature": BASE},
     )
 
 
@@ -204,7 +232,8 @@ def test_missing_days_default_to_flat_base() -> None:
                                       "thursday", "friday")
     assert weekend_write.weekdays == ("saturday", "sunday")
     assert weekend_write.blocks == (
-        {"start": "00:00", "end": "24:00", "temperature": BASE},
+        {"start": "00:00", "end": "03:00", "temperature": BASE},
+        {"start": "03:00", "end": "24:00", "temperature": BASE},
     )
 
 
