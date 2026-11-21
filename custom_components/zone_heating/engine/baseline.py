@@ -54,6 +54,18 @@ _MINUTES_PER_DAY = 1440
 # normally in Standby already (no visible change).
 _FLAT_SPLIT_MINUTE = 3 * 60  # 03:00
 
+# Tado accepts schedule-block times only on a 5-minute grid (visible in the app UI),
+# and rejects a block shorter than 15 minutes ("Each block must be at least 15
+# minutes."). HA's schedule helper cannot store a block ending at 00:00/24:00, so a
+# "run until midnight" block is kept as ``..->23:59``; left as-is that leaves a
+# 1-minute tail gap (00:00-24:00 fill) that Tado refuses, so the whole baseline
+# write fails and the zone stays on its last (often frost/off) Tado schedule.
+# We therefore snap every derived boundary to the 5-minute grid (23:59 -> 24:00,
+# the gap vanishes) and, as a safety net for odd schedules, merge any block that is
+# still shorter than the minimum into its neighbour (spec §8).
+_TADO_GRANULARITY_MIN = 5
+_MIN_BLOCK_MINUTES = 15
+
 
 @dataclass(frozen=True)
 class ScheduleBlock:
@@ -121,6 +133,50 @@ def _span(start: int, end: int, temperature: float) -> dict[str, object]:
     return {"start": _fmt(start), "end": _fmt(end), "temperature": float(temperature)}
 
 
+def _round_to_grid(minutes: int) -> int:
+    """Round a minutes-from-midnight value to the nearest Tado 5-minute boundary.
+
+    23:59 (1439) -> 1440 (24:00), 08:02 -> 08:00, 08:03 -> 08:05. Never exceeds the
+    end of the day (1440 is already on the grid).
+    """
+    rounded = ((minutes + _TADO_GRANULARITY_MIN // 2) // _TADO_GRANULARITY_MIN) * (
+        _TADO_GRANULARITY_MIN
+    )
+    return min(rounded, _MINUTES_PER_DAY)
+
+
+def _merge_short_blocks(
+    blocks: list[dict[str, object]], min_minutes: int
+) -> list[dict[str, object]]:
+    """Merge any block shorter than ``min_minutes`` into an adjacent one (spec §8).
+
+    Safety net for odd schedules that still produce a sub-minimum block after the
+    5-minute snap: a too-short block is absorbed by its previous neighbour (whose
+    setpoint then covers the span), or by the next one when it is the first block, so
+    the day stays contiguous and Tado never sees a block below its 15-minute floor. A
+    lone full-day block is returned unchanged (it is already valid).
+    """
+    merged = [dict(block) for block in blocks]
+    while len(merged) > 1:
+        idx = next(
+            (
+                i
+                for i, b in enumerate(merged)
+                if _to_minutes(b["end"]) - _to_minutes(b["start"]) < min_minutes  # type: ignore[arg-type]
+            ),
+            None,
+        )
+        if idx is None:
+            break
+        if idx == 0:
+            merged[1]["start"] = merged[0]["start"]
+            del merged[0]
+        else:
+            merged[idx - 1]["end"] = merged[idx]["end"]
+            del merged[idx]
+    return merged
+
+
 def _ensure_transition(blocks: list[dict[str, object]]) -> list[dict[str, object]]:
     """Guarantee a timetable transition (a "next block") for NEXT_TIME_BLOCK.
 
@@ -158,6 +214,10 @@ def derive_daily_blocks(
         end = _to_minutes(block.end)
         if end == 0 and start > 0:
             end = _MINUTES_PER_DAY
+        # Snap to Tado's 5-minute grid so a "until midnight" block stored as 23:59
+        # becomes 24:00 (no 1-minute tail gap) and odd times are Tado-valid.
+        start = _round_to_grid(start)
+        end = _round_to_grid(end)
         if end <= start:
             continue
         spans.append((start, end, float(block.temperature)))
@@ -176,6 +236,7 @@ def derive_daily_blocks(
         result.append(_span(cursor, _MINUTES_PER_DAY, base_temp))
     if not result:
         result.append(_span(0, _MINUTES_PER_DAY, base_temp))
+    result = _merge_short_blocks(result, _MIN_BLOCK_MINUTES)
     return _ensure_transition(result)
 
 

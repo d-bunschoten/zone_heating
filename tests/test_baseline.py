@@ -39,6 +39,18 @@ def _b(start: str, end: str, temp: float | None) -> ScheduleBlock:
     return ScheduleBlock(start=start, end=end, temperature=temp)
 
 
+def _minutes(value: str) -> int:
+    """Parse a block ``"HH:MM"`` (``"24:00"`` -> 1440) to minutes from midnight."""
+    if value == "24:00":
+        return 24 * 60
+    hours, minutes = value.split(":")[:2]
+    return int(hours) * 60 + int(minutes)
+
+
+def _duration(block: dict) -> int:
+    return _minutes(block["end"]) - _minutes(block["start"])
+
+
 # --- empty schedule -> flat base (split at the night boundary) ---------------
 # A flat full day is split at 03:00 into two identical blocks so a NEXT_TIME_BLOCK
 # overlay stays valid on it; the heating curve is unchanged.
@@ -112,6 +124,54 @@ def test_full_day_block_is_split_at_night_boundary() -> None:
     assert result == [
         {"start": "00:00", "end": "03:00", "temperature": 20.0},
         {"start": "03:00", "end": "24:00", "temperature": 20.0},
+    ]
+
+
+# --- Tado 5-minute grid snap + short-block merge (spec §8) -------------------
+def test_block_ending_at_2359_snaps_to_midnight() -> None:
+    """A "until midnight" block stored as 23:59 snaps to 24:00 (no 1-min tail gap).
+
+    This is the real-world case: HA's schedule helper cannot store an end of 00:00,
+    so the block is kept as ..->23:59; without the snap the 23:59->24:00 base fill is
+    a 1-minute block and Tado rejects the whole write ("at least 15 minutes").
+    """
+    result = derive_daily_blocks([_b("08:00", "23:59", 17.0)], BASE)
+    assert result == [
+        {"start": "00:00", "end": "08:00", "temperature": BASE},
+        {"start": "08:00", "end": "24:00", "temperature": 17.0},
+    ]
+
+
+def test_odd_times_snap_to_five_minute_grid() -> None:
+    """Off-grid boundaries round to the nearest 5 minutes (Tado's granularity)."""
+    result = derive_daily_blocks([_b("06:03", "08:02", 21.0)], BASE)
+    assert result == [
+        {"start": "00:00", "end": "06:05", "temperature": BASE},
+        {"start": "06:05", "end": "08:00", "temperature": 21.0},
+        {"start": "08:00", "end": "24:00", "temperature": BASE},
+    ]
+
+
+def test_sub_minimum_block_is_merged_into_neighbour() -> None:
+    """A block still shorter than 15 min after snapping is absorbed by its neighbour."""
+    result = derive_daily_blocks([_b("08:00", "08:07", 21.0)], BASE)
+    # 08:00-08:07 snaps to 08:00-08:05 (5 min) -> merged into the preceding base block.
+    assert result == [
+        {"start": "00:00", "end": "08:05", "temperature": BASE},
+        {"start": "08:05", "end": "24:00", "temperature": BASE},
+    ]
+    assert all(
+        _duration(block) >= 15 for block in result
+    ), "no block may be shorter than Tado's 15-minute floor"
+
+
+def test_leading_short_block_merges_into_next() -> None:
+    """A too-short first block is absorbed by the following one (day stays contiguous)."""
+    result = derive_daily_blocks([_b("00:00", "00:07", 21.0)], BASE)
+    # 00:00-00:05 (5 min) merges forward -> a flat base day, then night-split.
+    assert result == [
+        {"start": "00:00", "end": "03:00", "temperature": BASE},
+        {"start": "03:00", "end": "24:00", "temperature": BASE},
     ]
 
 
